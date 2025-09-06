@@ -2,5 +2,6 @@ Flask
 flask-cors
 pdfplumber
 gunicorn
-pip install firebase-admin
+firebase-admin
+
 
