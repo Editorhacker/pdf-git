@@ -4,12 +4,18 @@ from datetime import datetime
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import os
-import os
-import json
 import firebase_admin
 from firebase_admin import credentials, firestore
 
-# Load Firebase credentials from Render env var
+# ---------- Flask App ----------
+app = Flask(__name__)
+CORS(app)  # Allow all origins for development. Restrict in production.
+
+OUTPUT_JSON = "indent_data.json"
+UPLOAD_FOLDER = "uploads"
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
+# ---------- Firestore Setup ----------
 firebase_json = os.getenv("FIREBASE_CREDENTIALS")
 if not firebase_json:
     raise Exception("FIREBASE_CREDENTIALS env var not set")
@@ -17,11 +23,9 @@ if not firebase_json:
 cred_dict = json.loads(firebase_json)
 cred = credentials.Certificate(cred_dict)
 
-# Initialize Firebase
 firebase_admin.initialize_app(cred)
 db = firestore.client()
 indent_collection = db.collection("Indent_Quantity")
-
 
 # ---------- Extraction Logic ----------
 def extract_indent_data(pdf_path):
