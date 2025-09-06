@@ -2,13 +2,10 @@
 import pdfplumber
 import json
 from datetime import datetime
-
 from flask import Flask, request, jsonify
-
 import os
 
 app = Flask(__name__)
-
 OUTPUT_JSON = "indent_data.json"
 
 # ----------- Extraction Logic -----------
@@ -53,7 +50,6 @@ def extract_indent_data(pdf_path):
 
 
 # ----------- API Endpoints -----------
-
 @app.route("/upload", methods=["POST"])
 def upload_files():
     if "files" not in request.files:
@@ -108,4 +104,5 @@ def download_json():
 
 
 if __name__ == "__main__":
-    app.run(debug=True, port=5000)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(debug=False, host="0.0.0.0", port=port)
