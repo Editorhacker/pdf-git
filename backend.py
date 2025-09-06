@@ -1,18 +1,26 @@
-# backend.py
 import pdfplumber
 import json
 from datetime import datetime
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import os
+import os
+import json
+import firebase_admin
+from firebase_admin import credentials, firestore
 
-# ---------- Flask App ----------
-app = Flask(__name__)
-CORS(app)  # Allow all origins for development. Change to specific origins in production.
+# Load Firebase credentials from Render env var
+firebase_json = os.getenv("FIREBASE_CREDENTIALS")
+if not firebase_json:
+    raise Exception("FIREBASE_CREDENTIALS env var not set")
 
-OUTPUT_JSON = "indent_data.json"
-UPLOAD_FOLDER = "uploads"
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+cred_dict = json.loads(firebase_json)
+cred = credentials.Certificate(cred_dict)
+
+# Initialize Firebase
+firebase_admin.initialize_app(cred)
+db = firestore.client()
+indent_collection = db.collection("Indent_Quantity")
 
 
 # ---------- Extraction Logic ----------
@@ -46,13 +54,18 @@ def extract_indent_data(pdf_path):
                 except:
                     qty_val = qty
 
-                rows.append({
+                row = {
                     "ITEM_CODE": item_code,
                     "REQUIRED_QTY": qty_val,
                     "UOM": uom,
                     "DATE_OF_UPLOAD": upload_time,
                     "SOURCE_FILE": os.path.basename(pdf_path)
-                })
+                }
+                rows.append(row)
+
+                # ---------- Store in Firestore ----------
+                indent_collection.document(item_code).set(row, merge=True)
+
     return rows
 
 
