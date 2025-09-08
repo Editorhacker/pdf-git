@@ -46,29 +46,30 @@ def extract_indent_data(pdf_path):
             qty, uom, planned_order, planned_start_date = None, None, None, None
 
             for line in lines:
-                upper_line = line.upper()
+    upper_line = line.upper()
 
-                if "PROJECT NO" in upper_line:
-                    project_no = line.split(":")[-1].strip()
+    if "PROJECT NO" in upper_line:
+        project_no = line.split("-")[-1].strip()
 
-                if "ITEM CODE" in upper_line:
-                    item_code = line.split()[-1].strip()
+    if "ITEM CODE" in upper_line:
+        item_code = line.split("-")[-1].strip()
 
-                if "ITEM DESCRIPTION" in upper_line:
-                    item_desc = line.split(":", 1)[-1].strip()
+    if "PART DESCRIPTION" in upper_line:   # instead of ITEM DESCRIPTION
+        item_desc = line.split("-", 1)[-1].strip()
 
-                if "TOTAL ORDER QUANTITY" in upper_line and ":" in line:
-                    qty_part = line.split(":", 1)[1].strip()
-                    parts = qty_part.split()
-                    qty = parts[0]
-                    if len(parts) > 1:
-                        uom = parts[1]
+    if "TOTAL ORDER QUANTITY" in upper_line and ":" in line:
+        qty_part = line.split(":", 1)[1].strip()
+        parts = qty_part.split()
+        qty = parts[0]
+        if len(parts) > 1:
+            uom = parts[1]
 
-                if "PLANNED ORDER" in upper_line:
-                    planned_order = line.split(":")[-1].strip()
+    if "PLANNED ORDER" in upper_line and ":" in line:
+        planned_order = line.split(":", 1)[1].strip().split()[0]  # numeric part only
 
-                if "PLANNED START DATE" in upper_line:
-                    planned_start_date = line.split(":")[-1].strip()
+    if "PLANNED START DATE" in upper_line:
+        planned_start_date = line.split(":")[-1].strip()
+
 
             if item_code:
                 try:
