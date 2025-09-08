@@ -4,6 +4,7 @@ from datetime import datetime
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import os
+import uuid
 import firebase_admin
 from firebase_admin import credentials, firestore
 
@@ -39,36 +40,61 @@ def extract_indent_data(pdf_path):
                 continue
 
             lines = text.split("\n")
-            item_code, qty, uom = None, None, None
+
+            # Default values
+            project_no, item_code, item_desc = None, None, None
+            qty, uom, planned_order, planned_start_date = None, None, None, None
 
             for line in lines:
-                if "ITEM CODE" in line.upper():
+                upper_line = line.upper()
+
+                if "PROJECT NO" in upper_line:
+                    project_no = line.split(":")[-1].strip()
+
+                if "ITEM CODE" in upper_line:
                     item_code = line.split()[-1].strip()
 
-                if "TOTAL ORDER QUANTITY" in line.upper() and ":" in line:
+                if "ITEM DESCRIPTION" in upper_line:
+                    item_desc = line.split(":", 1)[-1].strip()
+
+                if "TOTAL ORDER QUANTITY" in upper_line and ":" in line:
                     qty_part = line.split(":", 1)[1].strip()
                     parts = qty_part.split()
                     qty = parts[0]
                     if len(parts) > 1:
                         uom = parts[1]
 
-            if item_code and qty and uom:
+                if "PLANNED ORDER" in upper_line:
+                    planned_order = line.split(":")[-1].strip()
+
+                if "PLANNED START DATE" in upper_line:
+                    planned_start_date = line.split(":")[-1].strip()
+
+            if item_code:
                 try:
-                    qty_val = float(qty)
+                    qty_val = float(qty) if qty else None
                 except:
                     qty_val = qty
 
+                # 🔑 Always generate UUID
+                doc_id = str(uuid.uuid4())
+
                 row = {
+                    "ID": doc_id,
+                    "PROJECT_NO": project_no,
                     "ITEM_CODE": item_code,
+                    "ITEM_DESCRIPTION": item_desc,
                     "REQUIRED_QTY": qty_val,
                     "UOM": uom,
+                    "PLANNED_ORDER": planned_order,
+                    "PLANNED_START_DATE": planned_start_date,
                     "DATE_OF_UPLOAD": upload_time,
                     "SOURCE_FILE": os.path.basename(pdf_path)
                 }
                 rows.append(row)
 
                 # ---------- Store in Firestore ----------
-                indent_collection.document(item_code).set(row, merge=True)
+                indent_collection.document(doc_id).set(row)
 
     return rows
 
