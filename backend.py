@@ -1,5 +1,6 @@
 import pdfplumber
 import json
+import re
 from datetime import datetime
 from flask import Flask, request, jsonify
 from flask_cors import CORS
@@ -47,37 +48,38 @@ def extract_indent_data(pdf_path):
 
             for line in lines:
                 upper_line = line.upper()
+
+                # --------- Clean with regex ---------
                 if "PROJECT NO" in upper_line:
-                    project_no = line.split("-")[-1].strip()
-                
+                    project_no = re.sub(r":?\s*Project\s*No\s*:\s*", "", line, flags=re.I).strip()
+
                 if "ITEM CODE" in upper_line:
-                    item_code = line.split("-")[-1].strip()
-            
+                    item_code = re.sub(r":?\s*BOI\s*Item\s*code\s*:\s*", "", line, flags=re.I).strip()
+
                 if "PART DESCRIPTION" in upper_line:   # instead of ITEM DESCRIPTION
-                    item_desc = line.split("-", 1)[-1].strip()
-            
+                    item_desc = re.sub(r":?\s*Part\s*Description\s*:\s*", "", line, flags=re.I).strip()
+
                 if "TOTAL ORDER QUANTITY" in upper_line and ":" in line:
                     qty_part = line.split(":", 1)[1].strip()
                     parts = qty_part.split()
                     qty = parts[0]
                     if len(parts) > 1:
                         uom = parts[1]
-            
+
                 if "PLANNED ORDER" in upper_line and ":" in line:
                     planned_order = line.split(":", 1)[1].strip().split()[0]  # numeric part only
-            
+
                 if "PLANNED START DATE" in upper_line:
                     planned_start_date = line.split(":")[-1].strip()
-            
 
+            # --------- Save row ---------
             if item_code:
                 try:
                     qty_val = float(qty) if qty else None
                 except:
                     qty_val = qty
 
-                # 🔑 Always generate UUID
-                doc_id = str(uuid.uuid4())
+                doc_id = str(uuid.uuid4())  # 🔑 Always generate UUID
 
                 row = {
                     "ID": doc_id,
