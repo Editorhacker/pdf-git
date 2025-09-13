@@ -29,6 +29,15 @@ firebase_admin.initialize_app(cred)
 db = firestore.client()
 indent_collection = db.collection("Indent_Quantity")
 
+# ---------- Regex patterns ----------
+# Inline row pattern (everything on one line)
+row_pattern = re.compile(
+    r":?\s*Project\s*No\s*[-:]\s*(\S+).*?"
+    r":?\s*BOI\s*Item\s*code\s*[-:]\s*(\S+).*?"
+    r"-\s*(\d+)\s+(\w+)\s+(\d+)\s+(\d{2}-\d{2}-\d{4})",
+    flags=re.I
+)
+
 # ---------- Extraction Logic ----------
 def extract_indent_data(pdf_path):
     rows = []
@@ -42,21 +51,47 @@ def extract_indent_data(pdf_path):
 
             lines = text.split("\n")
 
-            # Default values
+            # Default values (used in multi-line parsing)
             project_no, item_code, item_desc = None, None, None
             qty, uom, planned_order, planned_start_date = None, None, None, None
 
             for line in lines:
                 upper_line = line.upper()
 
-                # --------- Clean with regex ---------
+                # -------- Case 1: Full row in one line --------
+                match = row_pattern.search(line)
+                if match:
+                    project_no = match.group(1)
+                    item_code = match.group(2)
+                    qty_val = float(match.group(3))
+                    uom = match.group(4)
+                    planned_order = match.group(5)
+                    planned_start_date = match.group(6)
+
+                    row = {
+                        "ID": str(uuid.uuid4()),
+                        "PROJECT_NO": project_no,
+                        "ITEM_CODE": item_code,
+                        "ITEM_DESCRIPTION": None,  # inline rows don't have description
+                        "REQUIRED_QTY": qty_val,
+                        "UOM": uom,
+                        "PLANNED_ORDER": planned_order,
+                        "PLANNED_START_DATE": planned_start_date,
+                        "DATE_OF_UPLOAD": upload_time,
+                        "SOURCE_FILE": os.path.basename(pdf_path),
+                    }
+                    rows.append(row)
+                    indent_collection.document(row["ID"]).set(row)
+                    continue  # skip multi-line parsing for this line
+
+                # -------- Case 2: Multi-line key/value --------
                 if "PROJECT NO" in upper_line:
                     project_no = re.sub(r":?\s*Project\s*No\s*:\s*", "", line, flags=re.I).strip()
 
                 if "ITEM CODE" in upper_line:
                     item_code = re.sub(r":?\s*BOI\s*Item\s*code\s*:\s*", "", line, flags=re.I).strip()
 
-                if "PART DESCRIPTION" in upper_line:   # instead of ITEM DESCRIPTION
+                if "PART DESCRIPTION" in upper_line:
                     item_desc = re.sub(r":?\s*Part\s*Description\s*:\s*", "", line, flags=re.I).strip()
 
                 if "TOTAL ORDER QUANTITY" in upper_line and ":" in line:
@@ -67,22 +102,20 @@ def extract_indent_data(pdf_path):
                         uom = parts[1]
 
                 if "PLANNED ORDER" in upper_line and ":" in line:
-                    planned_order = line.split(":", 1)[1].strip().split()[0]  # numeric part only
+                    planned_order = line.split(":", 1)[1].strip().split()[0]
 
                 if "PLANNED START DATE" in upper_line:
                     planned_start_date = line.split(":")[-1].strip()
 
-            # --------- Save row ---------
-            if item_code:
+            # -------- Save multi-line row --------
+            if item_code and not any(r["ITEM_CODE"] == item_code for r in rows):
                 try:
                     qty_val = float(qty) if qty else None
                 except:
                     qty_val = qty
 
-                doc_id = str(uuid.uuid4())  # 🔑 Always generate UUID
-
                 row = {
-                    "ID": doc_id,
+                    "ID": str(uuid.uuid4()),
                     "PROJECT_NO": project_no,
                     "ITEM_CODE": item_code,
                     "ITEM_DESCRIPTION": item_desc,
@@ -91,12 +124,10 @@ def extract_indent_data(pdf_path):
                     "PLANNED_ORDER": planned_order,
                     "PLANNED_START_DATE": planned_start_date,
                     "DATE_OF_UPLOAD": upload_time,
-                    "SOURCE_FILE": os.path.basename(pdf_path)
+                    "SOURCE_FILE": os.path.basename(pdf_path),
                 }
                 rows.append(row)
-
-                # ---------- Store in Firestore ----------
-                indent_collection.document(doc_id).set(row)
+                indent_collection.document(row["ID"]).set(row)
 
     return rows
 
