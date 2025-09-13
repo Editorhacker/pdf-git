@@ -32,11 +32,12 @@ indent_collection = db.collection("Indent_Quantity")
 # ---------- Regex patterns ----------
 # Inline row pattern (everything on one line)
 row_pattern = re.compile(
-    r":?\s*Project\s*No\s*[-:]\s*(\S+).*?"
-    r":?\s*BOI\s*Item\s*code\s*[-:]\s*(\S+).*?"
+    r":?\s*Project\s*No\s*[-:]\s*(\S+)\s+"
+    r":?\s*BOI\s*Item\s*code\s*[-:]\s*(\S+)\s+"
     r"-\s*(\d+)\s+(\w+)\s+(\d+)\s+(\d{2}-\d{2}-\d{4})",
     flags=re.I
 )
+
 
 # ---------- Extraction Logic ----------
 def extract_indent_data(pdf_path):
