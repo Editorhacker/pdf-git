@@ -8,10 +8,11 @@ import os
 import uuid
 import firebase_admin
 from firebase_admin import credentials, firestore
+from werkzeug.utils import secure_filename
 
 # ---------- Flask App ----------
 app = Flask(__name__)
-CORS(app)  # Allow all origins for development. Restrict in production.
+CORS(app)
 
 OUTPUT_JSON = "indent_data.json"
 UPLOAD_FOLDER = "uploads"
@@ -38,7 +39,6 @@ row_pattern = re.compile(
     flags=re.I
 )
 
-
 # ---------- Extraction Logic ----------
 def extract_indent_data(pdf_path):
     rows = []
@@ -52,7 +52,7 @@ def extract_indent_data(pdf_path):
 
             lines = text.split("\n")
 
-            # Default values (used in multi-line parsing)
+            # Default values for multi-line parsing
             project_no, item_code, item_desc = None, None, None
             qty, uom, planned_order, planned_start_date = None, None, None, None
 
@@ -64,7 +64,10 @@ def extract_indent_data(pdf_path):
                 if match:
                     project_no = match.group(1)
                     item_code = match.group(2)
-                    qty_val = float(match.group(3))
+                    try:
+                        qty_val = float(match.group(3))
+                    except:
+                        qty_val = match.group(3)
                     uom = match.group(4)
                     planned_order = match.group(5)
                     planned_start_date = match.group(6)
@@ -73,7 +76,7 @@ def extract_indent_data(pdf_path):
                         "ID": str(uuid.uuid4()),
                         "PROJECT_NO": project_no,
                         "ITEM_CODE": item_code,
-                        "ITEM_DESCRIPTION": None,  # inline rows don't have description
+                        "ITEM_DESCRIPTION": None,
                         "REQUIRED_QTY": qty_val,
                         "UOM": uom,
                         "PLANNED_ORDER": planned_order,
@@ -83,14 +86,21 @@ def extract_indent_data(pdf_path):
                     }
                     rows.append(row)
                     indent_collection.document(row["ID"]).set(row)
-                    continue  # skip multi-line parsing for this line
+                    continue
 
                 # -------- Case 2: Multi-line key/value --------
                 if "PROJECT NO" in upper_line:
-                    project_no = re.sub(r":?\s*Project\s*No\s*:\s*", "", line, flags=re.I).strip()
+                    project_no = re.sub(r":?\s*Project\s*No\s*[:\-]?\s*", "", line, flags=re.I).strip()
 
                 if "ITEM CODE" in upper_line:
-                    item_code = re.sub(r":?\s*BOI\s*Item\s*code\s*:\s*", "", line, flags=re.I).strip()
+                    item_code = re.sub(r":?\s*BOI\s*Item\s*code\s*[:\-]?\s*", "", line, flags=re.I).strip()
+
+                # -------- Case 3: Plan Item merged row --------
+                if "PLAN ITEM" in upper_line and ":" in line:
+                    match = re.search(r"([A-Z]+\d+)([0-9A-Z]+)", line.split(":")[-1].strip())
+                    if match:
+                        project_no = match.group(1)
+                        item_code = match.group(2)
 
                 if "PART DESCRIPTION" in upper_line:
                     item_desc = re.sub(r":?\s*Part\s*Description\s*:\s*", "", line, flags=re.I).strip()
@@ -109,7 +119,7 @@ def extract_indent_data(pdf_path):
                     planned_start_date = line.split(":")[-1].strip()
 
             # -------- Save multi-line row --------
-            if item_code and not any(r["ITEM_CODE"] == item_code for r in rows):
+            if item_code:  # allow duplicates
                 try:
                     qty_val = float(qty) if qty else None
                 except:
@@ -132,7 +142,6 @@ def extract_indent_data(pdf_path):
 
     return rows
 
-
 # ---------- API Endpoints ----------
 @app.route("/upload", methods=["POST"])
 def upload_files():
@@ -144,19 +153,20 @@ def upload_files():
     file_summary = {}
 
     for f in files:
-        save_path = os.path.join(UPLOAD_FOLDER, f.filename)
+        safe_filename = secure_filename(f.filename)
+        save_path = os.path.join(UPLOAD_FOLDER, safe_filename)
         f.save(save_path)
 
         try:
             indent_data = extract_indent_data(save_path)
             all_indent_data.extend(indent_data)
 
-            file_summary[f.filename] = {
+            file_summary[safe_filename] = {
                 "items_extracted": len(indent_data),
                 "status": "Success"
             }
         except Exception as e:
-            file_summary[f.filename] = {
+            file_summary[safe_filename] = {
                 "items_extracted": 0,
                 "status": f"Error: {str(e)}"
             }
