@@ -1,3 +1,4 @@
+
 import pdfplumber
 import json
 import re
@@ -25,65 +26,41 @@ if not firebase_json:
 
 cred_dict = json.loads(firebase_json)
 cred = credentials.Certificate(cred_dict)
+
 firebase_admin.initialize_app(cred)
 db = firestore.client()
 indent_collection = db.collection("Indent_Quantity")
 
-# ---------- Firestore Connection Test ----------
-try:
-    test_ref = indent_collection.document("connection-test")
-    test_ref.set({"status": "ok", "time": datetime.now().isoformat()})
-    print("✅ Firestore connection test successful")
-except Exception as e:
-    print("❌ Firestore connection failed:", e)
-
-print("📂 Connected Firestore project:", cred_dict.get("project_id"))
-
-
-# ---------- Regex Patterns (unchanged) ----------
-row_pattern_rm = re.compile(
-    r"(?P<project>\S+)\s*:?\s*RM\s*Item\s*code\s*:\s*(?P<item>\S+)\s*-\s*"
-    r"(?P<qty>[\d.]+)\s*(?P<uom>[A-Z]+)\s*"
-    r"(?P<order>\d+)\s*(?P<date>\d{2}-\d{2}-\d{4})",
-    flags=re.I
-)
-
-row_pattern_item = re.compile(
-    r"(?P<project>\S+)\s*:?\s*Item\s*code\s*:\s*(?P<item>\S+)\s*-\s*"
-    r"(?P<qty>[\d.]+)\s*(?P<uom>[A-Z]+)\s*"
-    r"(?P<order>\d+)\s*(?P<date>\d{2}-\d{2}-\d{4})",
-    flags=re.I
-)
-
-row_pattern_plain = re.compile(
-    r"(?P<project>\S+)\s+(?P<item>\S+)\s*-\s*"
-    r"(?P<qty>[\d.]+)\s*(?P<uom>[A-Z]+)\s*"
-    r"(?P<order>\d+)\s*(?P<date>\d{2}-\d{2}-\d{4})",
+# ---------- Regex patterns ----------
+# Inline row pattern (everything on one line)
+row_pattern = re.compile(
+    r":?\s*Project\s*No\s*[-:]\s*(\S+)\s+"
+    r":?\s*BOI\s*Item\s*code\s*[-:]\s*(\S+)\s+"
+    r"-\s*(\d+)\s+(\w+)\s+(\d+)\s+(\d{2}-\d{2}-\d{4})",
     flags=re.I
 )
 
 # ---------- Extraction Logic ----------
-# ---------- Extraction Logic (Multi-line support) ----------
-# ---------- Extraction Logic (Combined Single & Multi-line) ----------
 def extract_indent_data(pdf_path):
     rows = []
     upload_time = datetime.now().strftime("%d-%m-%Y %H:%M:%S")
 
     with pdfplumber.open(pdf_path) as pdf:
-        for page_num, page in enumerate(pdf.pages, start=1):
+        for page in pdf.pages:
             text = page.extract_text()
             if not text:
                 continue
 
-            lines = [line.strip() for line in text.split("\n") if line.strip()]
+            lines = text.split("\n")
 
-            # Temporary variables for multi-line row
+            # Default values for multi-line parsing
             project_no, item_code, item_desc = None, None, None
             qty, uom, planned_order, planned_start_date = None, None, None, None
 
-            for line_num, line in enumerate(lines, start=1):
+            for line in lines:
                 upper_line = line.upper()
-                # ---------- Case 1: Full row in one line ----------
+
+                # -------- Case 1: Full row in one line --------
                 match = row_pattern.search(line)
                 if match:
                     project_no = match.group(1)
@@ -112,27 +89,29 @@ def extract_indent_data(pdf_path):
                     indent_collection.document(row["ID"]).set(row)
                     continue
 
-                # ---------- Case 2: Multi-line key/value ----------
+                # -------- Case 2: Multi-line key/value --------
                 if "PROJECT NO" in upper_line:
                     project_no = re.sub(r":?\s*Project\s*No\s*[:\-]?\s*", "", line, flags=re.I).strip()
 
                 if "ITEM CODE" in upper_line:
                     item_code = re.sub(r":?\s*BOI\s*Item\s*code\s*[:\-]?\s*", "", line, flags=re.I).strip()
 
+                # -------- Case 3: Plan Item merged row --------
                 if "PLAN ITEM" in upper_line and ":" in line:
                     match = re.search(r"([A-Z]+\d+)([0-9A-Z]+)", line.split(":")[-1].strip())
                     if match:
                         project_no = match.group(1)
                         item_code = match.group(2)
 
-                if "PART DESCRIPTION" in upper_line or "PART NUMBER AND DESCRIPTION" in upper_line:
-                    item_desc = re.sub(r":?\s*Part.*Description\s*[:\-]?\s*", "", line, flags=re.I).strip()
+                if "PART DESCRIPTION" in upper_line:
+                    item_desc = re.sub(r":?\s*Part\s*Description\s*:\s*", "", line, flags=re.I).strip()
 
-                if "TOTAL ORDER QUANTITY" in upper_line or "TOTAL QUANTITY" in upper_line:
-                    qty_part = line.split(":", 1)[1].strip() if ":" in line else line.strip()
+                if "TOTAL ORDER QUANTITY" in upper_line and ":" in line:
+                    qty_part = line.split(":", 1)[1].strip()
                     parts = qty_part.split()
                     qty = parts[0]
-                    uom = parts[1] if len(parts) > 1 else None
+                    if len(parts) > 1:
+                        uom = parts[1]
 
                 if "PLANNED ORDER" in upper_line and ":" in line:
                     planned_order = line.split(":", 1)[1].strip().split()[0]
@@ -140,8 +119,8 @@ def extract_indent_data(pdf_path):
                 if "PLANNED START DATE" in upper_line:
                     planned_start_date = line.split(":")[-1].strip()
 
-            # ---------- Save multi-line row ----------
-            if item_code:
+            # -------- Save multi-line row --------
+            if item_code:  # allow duplicates
                 try:
                     qty_val = float(qty) if qty else None
                 except:
@@ -163,7 +142,6 @@ def extract_indent_data(pdf_path):
                 indent_collection.document(row["ID"]).set(row)
 
     return rows
-
 
 # ---------- API Endpoints ----------
 @app.route("/upload", methods=["POST"])
@@ -208,6 +186,7 @@ def upload_files():
 
     return jsonify(output_data)
 
+
 @app.route("/download", methods=["GET"])
 def download_json():
     if not os.path.exists(OUTPUT_JSON):
@@ -216,6 +195,7 @@ def download_json():
     with open(OUTPUT_JSON, "r", encoding="utf-8") as f:
         data = json.load(f)
     return jsonify(data)
+
 
 # ---------- Run App ----------
 if __name__ == "__main__":
