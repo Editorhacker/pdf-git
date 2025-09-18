@@ -66,20 +66,22 @@ row_pattern_plain = re.compile(
 def extract_indent_data(pdf_path):
     rows = []
     upload_time = datetime.now().strftime("%d-%m-%Y %H:%M:%S")
-    batch = db.batch()  # batch write
+    batch = db.batch()  # batch write per PDF
 
     with pdfplumber.open(pdf_path) as pdf:
-        for page in pdf.pages:
+        for page_num, page in enumerate(pdf.pages, start=1):
             text = page.extract_text()
             if not text:
+                print(f"⚠️ Page {page_num} has no extractable text")
                 continue
 
             lines = text.split("\n")
-
-            for line in lines:
+            for line_num, line in enumerate(lines, start=1):
                 line = line.strip()
                 if not line:
                     continue
+
+                print(f"Processing Page {page_num} Line {line_num}: {line}")
 
                 match = None
                 for pattern in [row_pattern_rm, row_pattern_item, row_pattern_plain]:
@@ -90,18 +92,21 @@ def extract_indent_data(pdf_path):
                 if match:
                     project_no = match.group("project")
                     item_code = match.group("item")
-                    try:
-                        qty_val = float(match.group("qty"))
-                    except:
-                        qty_val = None
+                    qty_val = match.group("qty")
                     uom = match.group("uom")
                     planned_order = match.group("order")
                     planned_start_date = match.group("date")
 
-                    # Only save valid rows
+                    # Convert qty to float safely
+                    try:
+                        qty_val = float(qty_val)
+                    except:
+                        print(f"⚠️ Invalid quantity '{qty_val}' at Page {page_num} Line {line_num}")
+                        qty_val = None
+
                     if project_no and item_code and qty_val is not None:
                         row = {
-                            "ID": str(uuid.uuid4()),  # Always UUID
+                            "ID": str(uuid.uuid4()),
                             "PROJECT_NO": project_no,
                             "ITEM_CODE": item_code,
                             "ITEM_DESCRIPTION": None,
@@ -117,13 +122,15 @@ def extract_indent_data(pdf_path):
                         batch.set(doc_ref, row)
                         print(f"✅ Queued row {row['ID']} for Firestore")
 
-    # Commit all queued writes at once
+    # Commit batch after processing all pages of the PDF
     if rows:
         try:
             batch.commit()
             print(f"✅ Batch commit successful, {len(rows)} rows written")
         except Exception as e:
             print(f"❌ Batch commit failed: {e}")
+    else:
+        print("⚠️ No valid rows found to commit")
 
     return rows
 
