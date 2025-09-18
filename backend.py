@@ -34,16 +34,16 @@ indent_collection = db.collection("Indent_Quantity")
 # Combined inline row pattern to handle both formats
 row_pattern = re.compile(
     r"""
-    :?\s*Project\s*No\s*[-:]?\s*(JLE\d+)\s+       # Project No, e.g., JLE000061
-    (?:RM\s*)?                                     # Optional 'RM' prefix
-    (?::?\s*BOI\s*)?Item\s*code\s*[-:]?\s*([A-Z0-9]+)\s+  # Item code
-    -\s*(\d+)\s+                                  # Quantity
-    (\w+)\s+                                      # UOM
-    (\d+)\s+                                      # Planned order
-    (\d{2}-\d{2}-\d{4})                           # Planned start date
+    Project\s*No\s*[:\-]?\s*(JLE\d+)\s+          # Project number, e.g., JLE000061
+    Item\s*code\s*[:\-]?\s*([A-Z0-9]+)\s+       # Item code
+    -\s*(\d+\.?\d*)\s+                           # Quantity (integer or float)
+    (\w+)\s+                                     # UOM
+    (\d+)\s+                                     # Planned order
+    (\d{2}-\d{2}-\d{4})                          # Planned start date
     """,
     flags=re.I | re.VERBOSE
 )
+
 
 # ---------- Extraction Logic ----------
 def extract_indent_data(pdf_path):
@@ -101,16 +101,18 @@ def extract_indent_data(pdf_path):
                         project_no = match.group(0).strip().upper()
                 
                 if "ITEM CODE" in upper_line:
-                    match = re.search(r"[A-Z0-9]+", line)
-                    if match:
-                        item_code = match.group(0).strip().upper()
+                    parts = line.split(":")
+                    if len(parts) > 1:
+                        match = re.search(r"([A-Z0-9]+)$", parts[-1].strip())
+                        if match:
+                            item_code = match.group(0).strip().upper()
                 
                 # -------- Case 3: Plan Item merged row --------
                 if "PLAN ITEM" in upper_line and ":" in line:
-                    match = re.search(r"(JLE\d+)\s+([A-Z0-9]+)", line.split(":")[-1].strip())
-                    if match:
-                        project_no = match.group(1).strip().upper()
-                        item_code = match.group(2).strip().upper()
+                    parts = line.split(":")[-1].strip().split()
+                    if len(parts) >= 2:
+                        project_no = parts[0].strip().upper()
+                        item_code = parts[1].strip().upper()
 
                 if "PART DESCRIPTION" in upper_line:
                     item_desc = re.sub(r":?\s*Part\s*Description\s*:\s*", "", line, flags=re.I).strip()
