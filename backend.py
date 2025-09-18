@@ -30,12 +30,28 @@ firebase_admin.initialize_app(cred)
 db = firestore.client()
 indent_collection = db.collection("Indent_Quantity")
 
-# ---------- Regex patterns ----------
-# Inline row pattern (everything on one line)
-row_pattern = re.compile(
-    r":?\s*Project\s*No\s*[-:]\s*(\S+)\s+"
-    r":?\s*BOI\s*Item\s*code\s*[-:]\s*(\S+)\s+"
-    r"-\s*(\d+)\s+(\w+)\s+(\d+)\s+(\d{2}-\d{2}-\d{4})",
+# ---------- Regex Patterns ----------
+# Format 1: Project + RM Item code
+row_pattern_rm = re.compile(
+    r"(?P<project>\S+)\s*:?\s*RM\s*Item\s*code\s*:\s*(?P<item>\S+)\s*-\s*"
+    r"(?P<qty>[\d.]+)\s*(?P<uom>[A-Z]+)\s*"
+    r"(?P<order>\d+)\s*(?P<date>\d{2}-\d{2}-\d{4})",
+    flags=re.I
+)
+
+# Format 2: Project + Item code
+row_pattern_item = re.compile(
+    r"(?P<project>\S+)\s*:?\s*Item\s*code\s*:\s*(?P<item>\S+)\s*-\s*"
+    r"(?P<qty>[\d.]+)\s*(?P<uom>[A-Z]+)\s*"
+    r"(?P<order>\d+)\s*(?P<date>\d{2}-\d{2}-\d{4})",
+    flags=re.I
+)
+
+# Format 3: Project + Item code (no label)
+row_pattern_plain = re.compile(
+    r"(?P<project>\S+)\s+(?P<item>\S+)\s*-\s*"
+    r"(?P<qty>[\d.]+)\s*(?P<uom>[A-Z]+)\s*"
+    r"(?P<order>\d+)\s*(?P<date>\d{2}-\d{2}-\d{4})",
     flags=re.I
 )
 
@@ -52,28 +68,27 @@ def extract_indent_data(pdf_path):
 
             lines = text.split("\n")
 
-            # Default values for multi-line parsing
-            project_no, item_code, item_desc = None, None, None
-            qty, uom, planned_order, planned_start_date = None, None, None, None
-
             for line in lines:
-                upper_line = line.upper()
+                line = line.strip()
+                if not line:
+                    continue
 
-                # -------- Case 1: Full row in one line --------
-                match = row_pattern.search(line)
+                match = None
+                for pattern in [row_pattern_rm, row_pattern_item, row_pattern_plain]:
+                    match = pattern.search(line)
+                    if match:
+                        break
+
                 if match:
-                    project_no = match.group(1)
-                    item_code = match.group(2)
-                    try:
-                        qty_val = float(match.group(3))
-                    except:
-                        qty_val = match.group(3)
-                    uom = match.group(4)
-                    planned_order = match.group(5)
-                    planned_start_date = match.group(6)
+                    project_no = match.group("project")
+                    item_code = match.group("item")
+                    qty_val = float(match.group("qty"))
+                    uom = match.group("uom")
+                    planned_order = match.group("order")
+                    planned_start_date = match.group("date")
 
                     row = {
-                        "ID": str(uuid.uuid4()),
+                        "ID": str(uuid.uuid4()),  # Always UUID
                         "PROJECT_NO": project_no,
                         "ITEM_CODE": item_code,
                         "ITEM_DESCRIPTION": None,
@@ -84,61 +99,9 @@ def extract_indent_data(pdf_path):
                         "DATE_OF_UPLOAD": upload_time,
                         "SOURCE_FILE": os.path.basename(pdf_path),
                     }
+
                     rows.append(row)
                     indent_collection.document(row["ID"]).set(row)
-                    continue
-
-                # -------- Case 2: Multi-line key/value --------
-                if "PROJECT NO" in upper_line:
-                    project_no = re.sub(r":?\s*Project\s*No\s*[:\-]?\s*", "", line, flags=re.I).strip()
-
-                if "ITEM CODE" in upper_line:
-                    item_code = re.sub(r":?\s*BOI\s*Item\s*code\s*[:\-]?\s*", "", line, flags=re.I).strip()
-
-                # -------- Case 3: Plan Item merged row --------
-                if "PLAN ITEM" in upper_line and ":" in line:
-                    match = re.search(r"([A-Z]+\d+)([0-9A-Z]+)", line.split(":")[-1].strip())
-                    if match:
-                        project_no = match.group(1)
-                        item_code = match.group(2)
-
-                if "PART DESCRIPTION" in upper_line:
-                    item_desc = re.sub(r":?\s*Part\s*Description\s*:\s*", "", line, flags=re.I).strip()
-
-                if "TOTAL ORDER QUANTITY" in upper_line and ":" in line:
-                    qty_part = line.split(":", 1)[1].strip()
-                    parts = qty_part.split()
-                    qty = parts[0]
-                    if len(parts) > 1:
-                        uom = parts[1]
-
-                if "PLANNED ORDER" in upper_line and ":" in line:
-                    planned_order = line.split(":", 1)[1].strip().split()[0]
-
-                if "PLANNED START DATE" in upper_line:
-                    planned_start_date = line.split(":")[-1].strip()
-
-            # -------- Save multi-line row --------
-            if item_code:  # allow duplicates
-                try:
-                    qty_val = float(qty) if qty else None
-                except:
-                    qty_val = qty
-
-                row = {
-                    "ID": str(uuid.uuid4()),
-                    "PROJECT_NO": project_no,
-                    "ITEM_CODE": item_code,
-                    "ITEM_DESCRIPTION": item_desc,
-                    "REQUIRED_QTY": qty_val,
-                    "UOM": uom,
-                    "PLANNED_ORDER": planned_order,
-                    "PLANNED_START_DATE": planned_start_date,
-                    "DATE_OF_UPLOAD": upload_time,
-                    "SOURCE_FILE": os.path.basename(pdf_path),
-                }
-                rows.append(row)
-                indent_collection.document(row["ID"]).set(row)
 
     return rows
 
@@ -185,7 +148,6 @@ def upload_files():
 
     return jsonify(output_data)
 
-
 @app.route("/download", methods=["GET"])
 def download_json():
     if not os.path.exists(OUTPUT_JSON):
@@ -194,7 +156,6 @@ def download_json():
     with open(OUTPUT_JSON, "r", encoding="utf-8") as f:
         data = json.load(f)
     return jsonify(data)
-
 
 # ---------- Run App ----------
 if __name__ == "__main__":
