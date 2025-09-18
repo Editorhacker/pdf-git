@@ -37,7 +37,8 @@ try:
 except Exception as e:
     print("❌ Firestore connection failed:", e)
 
-print("📂 Connected Firestore project:", db._client.project)
+print("📂 Connected Firestore project:", cred_dict.get("project_id"))
+
 
 # ---------- Regex Patterns (unchanged) ----------
 row_pattern_rm = re.compile(
