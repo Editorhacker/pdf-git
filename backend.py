@@ -25,13 +25,21 @@ if not firebase_json:
 
 cred_dict = json.loads(firebase_json)
 cred = credentials.Certificate(cred_dict)
-
 firebase_admin.initialize_app(cred)
 db = firestore.client()
 indent_collection = db.collection("Indent_Quantity")
 
-# ---------- Regex Patterns ----------
-# Format 1: Project + RM Item code
+# ---------- Firestore Connection Test ----------
+try:
+    test_ref = indent_collection.document("connection-test")
+    test_ref.set({"status": "ok", "time": datetime.now().isoformat()})
+    print("✅ Firestore connection test successful")
+except Exception as e:
+    print("❌ Firestore connection failed:", e)
+
+print("📂 Connected Firestore project:", db._client.project)
+
+# ---------- Regex Patterns (unchanged) ----------
 row_pattern_rm = re.compile(
     r"(?P<project>\S+)\s*:?\s*RM\s*Item\s*code\s*:\s*(?P<item>\S+)\s*-\s*"
     r"(?P<qty>[\d.]+)\s*(?P<uom>[A-Z]+)\s*"
@@ -39,7 +47,6 @@ row_pattern_rm = re.compile(
     flags=re.I
 )
 
-# Format 2: Project + Item code
 row_pattern_item = re.compile(
     r"(?P<project>\S+)\s*:?\s*Item\s*code\s*:\s*(?P<item>\S+)\s*-\s*"
     r"(?P<qty>[\d.]+)\s*(?P<uom>[A-Z]+)\s*"
@@ -47,7 +54,6 @@ row_pattern_item = re.compile(
     flags=re.I
 )
 
-# Format 3: Project + Item code (no label)
 row_pattern_plain = re.compile(
     r"(?P<project>\S+)\s+(?P<item>\S+)\s*-\s*"
     r"(?P<qty>[\d.]+)\s*(?P<uom>[A-Z]+)\s*"
@@ -59,6 +65,7 @@ row_pattern_plain = re.compile(
 def extract_indent_data(pdf_path):
     rows = []
     upload_time = datetime.now().strftime("%d-%m-%Y %H:%M:%S")
+    batch = db.batch()  # batch write
 
     with pdfplumber.open(pdf_path) as pdf:
         for page in pdf.pages:
@@ -82,26 +89,40 @@ def extract_indent_data(pdf_path):
                 if match:
                     project_no = match.group("project")
                     item_code = match.group("item")
-                    qty_val = float(match.group("qty"))
+                    try:
+                        qty_val = float(match.group("qty"))
+                    except:
+                        qty_val = None
                     uom = match.group("uom")
                     planned_order = match.group("order")
                     planned_start_date = match.group("date")
 
-                    row = {
-                        "ID": str(uuid.uuid4()),  # Always UUID
-                        "PROJECT_NO": project_no,
-                        "ITEM_CODE": item_code,
-                        "ITEM_DESCRIPTION": None,
-                        "REQUIRED_QTY": qty_val,
-                        "UOM": uom,
-                        "PLANNED_ORDER": planned_order,
-                        "PLANNED_START_DATE": planned_start_date,
-                        "DATE_OF_UPLOAD": upload_time,
-                        "SOURCE_FILE": os.path.basename(pdf_path),
-                    }
+                    # Only save valid rows
+                    if project_no and item_code and qty_val is not None:
+                        row = {
+                            "ID": str(uuid.uuid4()),  # Always UUID
+                            "PROJECT_NO": project_no,
+                            "ITEM_CODE": item_code,
+                            "ITEM_DESCRIPTION": None,
+                            "REQUIRED_QTY": qty_val,
+                            "UOM": uom,
+                            "PLANNED_ORDER": planned_order,
+                            "PLANNED_START_DATE": planned_start_date,
+                            "DATE_OF_UPLOAD": upload_time,
+                            "SOURCE_FILE": os.path.basename(pdf_path),
+                        }
+                        rows.append(row)
+                        doc_ref = indent_collection.document(row["ID"])
+                        batch.set(doc_ref, row)
+                        print(f"✅ Queued row {row['ID']} for Firestore")
 
-                    rows.append(row)
-                    indent_collection.document(row["ID"]).set(row)
+    # Commit all queued writes at once
+    if rows:
+        try:
+            batch.commit()
+            print(f"✅ Batch commit successful, {len(rows)} rows written")
+        except Exception as e:
+            print(f"❌ Batch commit failed: {e}")
 
     return rows
 
