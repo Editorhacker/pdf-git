@@ -91,11 +91,15 @@ def extract_indent_data(pdf_path):
 
                 # -------- Case 2: Multi-line key/value --------
                 if "PROJECT NO" in upper_line:
-                    project_no = re.sub(r":?\s*Project\s*No\s*[:\-]?\s*", "", line, flags=re.I).strip()
-
+                    match = re.search(r"JLE\d+", line)
+                    if match:
+                        project_no = match.group(0)
+                
                 if "ITEM CODE" in upper_line:
-                    item_code = re.sub(r":?\s*BOI\s*Item\s*code\s*[:\-]?\s*", "", line, flags=re.I).strip()
-
+                    match = re.search(r"[A-Z0-9]+", line)
+                    if match:
+                        item_code = match.group(0)
+                
                 # -------- Case 3: Plan Item merged row --------
                 if "PLAN ITEM" in upper_line and ":" in line:
                     match = re.search(r"([A-Z]+\d+)([0-9A-Z]+)", line.split(":")[-1].strip())
