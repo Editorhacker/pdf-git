@@ -1,4 +1,3 @@
-
 import pdfplumber
 import json
 import re
@@ -32,14 +31,19 @@ db = firestore.client()
 indent_collection = db.collection("Indent_Quantity")
 
 # ---------- Regex patterns ----------
-# Inline row pattern (everything on one line)
+# Combined inline row pattern to handle both formats
 row_pattern = re.compile(
-    r"Project\s*No\s*[:\-]?\s*(JLE\d+)\s+"
-    r"(?:RM\s*)?Item\s*code\s*[:\-]?\s*([A-Z0-9]+)\s+"
-    r"-\s*(\d+)\s+(\w+)\s+(\d+)\s+(\d{2}-\d{2}-\d{4})",
-    flags=re.I
+    r"""
+    :?\s*Project\s*No\s*[-:]?\s*(JLE\d+)\s+       # Project No, e.g., JLE000061
+    (?:RM\s*)?                                     # Optional 'RM' prefix
+    (?::?\s*BOI\s*)?Item\s*code\s*[-:]?\s*([A-Z0-9]+)\s+  # Item code
+    -\s*(\d+)\s+                                  # Quantity
+    (\w+)\s+                                      # UOM
+    (\d+)\s+                                      # Planned order
+    (\d{2}-\d{2}-\d{4})                           # Planned start date
+    """,
+    flags=re.I | re.VERBOSE
 )
-
 
 # ---------- Extraction Logic ----------
 def extract_indent_data(pdf_path):
@@ -64,15 +68,15 @@ def extract_indent_data(pdf_path):
                 # -------- Case 1: Full row in one line --------
                 match = row_pattern.search(line)
                 if match:
-                    project_no = match.group(1)
-                    item_code = match.group(2)
+                    project_no = match.group(1).strip().upper()
+                    item_code = match.group(2).strip().upper()
                     try:
                         qty_val = float(match.group(3))
                     except:
                         qty_val = match.group(3)
-                    uom = match.group(4)
-                    planned_order = match.group(5)
-                    planned_start_date = match.group(6)
+                    uom = match.group(4).strip()
+                    planned_order = match.group(5).strip()
+                    planned_start_date = match.group(6).strip()
 
                     row = {
                         "ID": str(uuid.uuid4()),
@@ -94,19 +98,19 @@ def extract_indent_data(pdf_path):
                 if "PROJECT NO" in upper_line:
                     match = re.search(r"JLE\d+", line)
                     if match:
-                        project_no = match.group(0)
+                        project_no = match.group(0).strip().upper()
                 
                 if "ITEM CODE" in upper_line:
                     match = re.search(r"[A-Z0-9]+", line)
                     if match:
-                        item_code = match.group(0)
+                        item_code = match.group(0).strip().upper()
                 
                 # -------- Case 3: Plan Item merged row --------
                 if "PLAN ITEM" in upper_line and ":" in line:
-                    match = re.search(r"([A-Z]+\d+)([0-9A-Z]+)", line.split(":")[-1].strip())
+                    match = re.search(r"(JLE\d+)\s+([A-Z0-9]+)", line.split(":")[-1].strip())
                     if match:
-                        project_no = match.group(1)
-                        item_code = match.group(2)
+                        project_no = match.group(1).strip().upper()
+                        item_code = match.group(2).strip().upper()
 
                 if "PART DESCRIPTION" in upper_line:
                     item_desc = re.sub(r":?\s*Part\s*Description\s*:\s*", "", line, flags=re.I).strip()
