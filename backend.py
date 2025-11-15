@@ -101,10 +101,11 @@ def extract_indent_data(pdf_path):
                     continue
 
                 # -------- Case 2: Multi-line key/value --------
-                if "PROJECT NO" in upper_line:
-                    match = re.search(r"JLE\d+", line)
-                    if match:
-                        project_no = match.group(0).strip().upper()
+               if "PROJECT NO" in upper_line and project_no is None:
+                   match = re.search(r"(J[A-Z]{2}\d+)", line)
+                   if match:
+                       project_no = match.group(0).strip().upper()
+
                 
                 if "ITEM CODE" in upper_line:
                     parts = line.split(":")
