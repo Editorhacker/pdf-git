@@ -30,15 +30,16 @@ firebase_admin.initialize_app(cred)
 db = firestore.client()
 indent_collection = db.collection("Indent_Quantity")
 
-# ---------- Regex patterns ----------
+# ---------- Regex pattern ----------
+# PROJECT_NO = 3 letters + 6 digits (e.g., JSE000019)
+# ITEM_CODE = remaining alphanumeric characters
 row_pattern = re.compile(
     r"""
-    Project\s*No\s*[:\-]?\s*(JLE\d+)\s+          
-    Item\s*code\s*[:\-]?\s*([A-Z0-9]+)\s+       
-    -\s*(\d+\.?\d*)\s+                           
-    (\w+)\s+                                     
-    (\d+)\s+                                     
-    (\d{2}-\d{2}-\d{4})                          
+    Project\s*No\s*[:\-]?\s*([A-Z]{3}\d{6})([A-Z0-9]+)\s+    
+    -\s*(\d+\.?\d*)\s+                                     
+    (\w+)\s+                                              
+    (\d+)\s+                                              
+    (\d{2}-\d{2}-\d{4})                                    
     """,
     flags=re.I | re.VERBOSE
 )
@@ -49,7 +50,7 @@ def extract_indent_data(pdf_path):
     upload_time = datetime.now().strftime("%d-%m-%Y %H:%M:%S")
 
     source_file = os.path.basename(pdf_path)
-    file_base = os.path.splitext(source_file)[0]  # 🔥 filename without .pdf
+    file_base = os.path.splitext(source_file)[0]
 
     with pdfplumber.open(pdf_path) as pdf:
         for page in pdf.pages:
@@ -64,20 +65,17 @@ def extract_indent_data(pdf_path):
             for line in lines:
                 upper_line = line.upper()
 
-                # -------- Case 1: Full row --------
+                # -------- Case 1: Full row ----
                 match = row_pattern.search(line)
                 if match:
                     project_no = match.group(1).strip().upper()
                     item_code = match.group(2).strip().upper()
-                    try:
-                        qty_val = float(match.group(3))
-                    except:
-                        qty_val = match.group(3)
+                    qty_val = float(match.group(3)) if match.group(3) else None
                     uom = match.group(4).strip()
                     planned_order = match.group(5).strip()
                     planned_start_date = match.group(6).strip()
 
-                    unique_code = f"{file_base}{project_no}{item_code}"  # 🔥 UNIQUE CODE
+                    unique_code = f"{project_no}_{item_code}"
 
                     row = {
                         "ID": str(uuid.uuid4()),
@@ -90,24 +88,23 @@ def extract_indent_data(pdf_path):
                         "PLANNED_START_DATE": planned_start_date,
                         "DATE_OF_UPLOAD": upload_time,
                         "SOURCE_FILE": source_file,
-                        "UNIQUE_CODE": unique_code,  # 🔥 STORE UNIQUE CODE
+                        "UNIQUE_CODE": unique_code,
                     }
                     rows.append(row)
                     indent_collection.document(row["ID"]).set(row)
                     continue
 
-                # -------- Case 2: Multi-line --------
+                # -------- Case 2: Multi-line ----
                 if "PROJECT NO" in upper_line:
-                    match = re.search(r"JLE\d+", line)
+                    match = re.search(r"([A-Z]{3}\d{6})([A-Z0-9]+)?", line.replace(" ", ""))
                     if match:
-                        project_no = match.group(0).strip().upper()
+                        project_no = match.group(1)
+                        item_code = match.group(2) if match.group(2) else item_code
 
-                if "ITEM CODE" in upper_line:
+                if "ITEM CODE" in upper_line and item_code is None:
                     parts = line.split(":")
                     if len(parts) > 1:
-                        match = re.search(r"([A-Z0-9]+)$", parts[-1].strip())
-                        if match:
-                            item_code = match.group(0).strip().upper()
+                        item_code = parts[-1].strip().upper()
 
                 if "PLAN ITEM" in upper_line and ":" in line:
                     parts = line.split(":")[-1].strip().split()
@@ -119,11 +116,9 @@ def extract_indent_data(pdf_path):
                     item_desc = re.sub(r":?\s*Part\s*Description\s*:\s*", "", line, flags=re.I).strip()
 
                 if "TOTAL ORDER QUANTITY" in upper_line and ":" in line:
-                    qty_part = line.split(":", 1)[1].strip()
-                    parts = qty_part.split()
-                    qty = parts[0]
-                    if len(parts) > 1:
-                        uom = parts[1]
+                    qty_part = line.split(":", 1)[1].strip().split()
+                    qty = qty_part[0]
+                    uom = qty_part[1] if len(qty_part) > 1 else None
 
                 if "PLANNED ORDER" in upper_line and ":" in line:
                     planned_order = line.split(":", 1)[1].strip().split()[0]
@@ -131,14 +126,10 @@ def extract_indent_data(pdf_path):
                 if "PLANNED START DATE" in upper_line:
                     planned_start_date = line.split(":")[-1].strip()
 
-            # -------- Final Save for multi-line --------
+            # -------- Final save for multi-line ----
             if item_code:
-                try:
-                    qty_val = float(qty) if qty else None
-                except:
-                    qty_val = qty
-
-                unique_code = f"{file_base}{project_no}{item_code}"  # 🔥 UNIQUE CODE
+                qty_val = float(qty) if (qty and qty.replace('.', '', 1).isdigit()) else qty
+                unique_code = f"{project_no}_{item_code}"
 
                 row = {
                     "ID": str(uuid.uuid4()),
@@ -151,7 +142,7 @@ def extract_indent_data(pdf_path):
                     "PLANNED_START_DATE": planned_start_date,
                     "DATE_OF_UPLOAD": upload_time,
                     "SOURCE_FILE": source_file,
-                    "UNIQUE_CODE": unique_code,  # 🔥 STORE UNIQUE CODE
+                    "UNIQUE_CODE": unique_code,
                 }
                 rows.append(row)
                 indent_collection.document(row["ID"]).set(row)
