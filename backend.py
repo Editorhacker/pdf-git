@@ -49,7 +49,7 @@ def extract_indent_data(pdf_path):
     upload_time = datetime.now().strftime("%d-%m-%Y %H:%M:%S")
 
     source_file = os.path.basename(pdf_path)
-    file_base = os.path.splitext(source_file)[0]  # 🔥 filename without .pdf
+    file_base = os.path.splitext(source_file)[0]
 
     with pdfplumber.open(pdf_path) as pdf:
         for page in pdf.pages:
@@ -58,26 +58,34 @@ def extract_indent_data(pdf_path):
                 continue
 
             lines = text.split("\n")
-            project_no, item_code, item_desc = None, None, None
-            qty, uom, planned_order, planned_start_date = None, None, None, None
+
+            project_no = None
+            item_code = None
+            item_desc = None
+            qty = None
+            uom = None
+            planned_order = None
+            planned_start_date = None
 
             for line in lines:
                 upper_line = line.upper()
 
-                # -------- Case 1: Full row --------
+                # ===== CASE 1: Full row match using regex =====
                 match = row_pattern.search(line)
                 if match:
                     project_no = match.group(1).strip().upper()
                     item_code = match.group(2).strip().upper()
+
                     try:
                         qty_val = float(match.group(3))
                     except:
                         qty_val = match.group(3)
+
                     uom = match.group(4).strip()
                     planned_order = match.group(5).strip()
                     planned_start_date = match.group(6).strip()
 
-                    unique_code = f"{file_base}{project_no}{item_code}"  # 🔥 UNIQUE CODE
+                    unique_code = f"{file_base}{project_no}{item_code}"
 
                     row = {
                         "ID": str(uuid.uuid4()),
@@ -90,55 +98,59 @@ def extract_indent_data(pdf_path):
                         "PLANNED_START_DATE": planned_start_date,
                         "DATE_OF_UPLOAD": upload_time,
                         "SOURCE_FILE": source_file,
-                        "UNIQUE_CODE": unique_code,  # 🔥 STORE UNIQUE CODE
+                        "UNIQUE_CODE": unique_code,
                     }
+
                     rows.append(row)
                     indent_collection.document(row["ID"]).set(row)
                     continue
 
-                # -------- Case 2: Multi-line --------
-                if "PROJECT NO" in upper_line:
-                    match = re.search(r"JLE\d+", line)
-                    if match:
-                        project_no = match.group(0).strip().upper()
+                # ===== CASE 2: Multi-line fallback =====
 
-                if "ITEM CODE" in upper_line:
-                    parts = line.split(":")
-                    if len(parts) > 1:
-                        match = re.search(r"([A-Z0-9]+)$", parts[-1].strip())
-                        if match:
-                            item_code = match.group(0).strip().upper()
+                # PROJECT NO — extract once & don't replace later
+                if "PROJECT NO" in upper_line and project_no is None:
+                    m = re.search(r"(J[A-Z]{2}\d+)", line)
+                    if m:
+                        project_no = m.group(1).strip().upper()
 
-                if "PLAN ITEM" in upper_line and ":" in line:
+                # PLAN ITEM format = PROJECTNO ITEMCODE (extract once)
+                if "PLAN ITEM" in upper_line and ":" in line and (project_no is None or item_code is None):
                     parts = line.split(":")[-1].strip().split()
                     if len(parts) >= 2:
-                        project_no = parts[0].strip().upper()
-                        item_code = parts[1].strip().upper()
+                        if project_no is None:
+                            project_no = parts[0].strip().upper()
+                        if item_code is None:
+                            item_code = parts[1].strip().upper()
 
-                if "PART DESCRIPTION" in upper_line:
+                # ITEM CODE — extract once & don't replace later
+                if "ITEM CODE" in upper_line and item_code is None:
+                    m = re.search(r"([A-Z0-9]+)$", line.strip())
+                    if m:
+                        item_code = m.group(1).strip().upper()
+
+                if "PART DESCRIPTION" in upper_line and item_desc is None:
                     item_desc = re.sub(r":?\s*Part\s*Description\s*:\s*", "", line, flags=re.I).strip()
 
                 if "TOTAL ORDER QUANTITY" in upper_line and ":" in line:
-                    qty_part = line.split(":", 1)[1].strip()
-                    parts = qty_part.split()
-                    qty = parts[0]
-                    if len(parts) > 1:
-                        uom = parts[1]
+                    qty_part = line.split(":", 1)[1].strip().split()
+                    qty = qty_part[0]
+                    if len(qty_part) > 1:
+                        uom = qty_part[1]
 
-                if "PLANNED ORDER" in upper_line and ":" in line:
+                if "PLANNED ORDER" in upper_line and ":" in line and planned_order is None:
                     planned_order = line.split(":", 1)[1].strip().split()[0]
 
-                if "PLANNED START DATE" in upper_line:
+                if "PLANNED START DATE" in upper_line and planned_start_date is None:
                     planned_start_date = line.split(":")[-1].strip()
 
-            # -------- Final Save for multi-line --------
+            # ===== Save multi-line row only when item_code exists =====
             if item_code:
                 try:
                     qty_val = float(qty) if qty else None
                 except:
                     qty_val = qty
 
-                unique_code = f"{file_base}{project_no}{item_code}"  # 🔥 UNIQUE CODE
+                unique_code = f"{file_base}{project_no or ''}{item_code}"
 
                 row = {
                     "ID": str(uuid.uuid4()),
@@ -151,8 +163,9 @@ def extract_indent_data(pdf_path):
                     "PLANNED_START_DATE": planned_start_date,
                     "DATE_OF_UPLOAD": upload_time,
                     "SOURCE_FILE": source_file,
-                    "UNIQUE_CODE": unique_code,  # 🔥 STORE UNIQUE CODE
+                    "UNIQUE_CODE": unique_code,
                 }
+
                 rows.append(row)
                 indent_collection.document(row["ID"]).set(row)
 
