@@ -30,26 +30,16 @@ firebase_admin.initialize_app(cred)
 db = firestore.client()
 indent_collection = db.collection("Indent_Quantity")
 
-# ---------- Regex patterns ----------
-row_pattern = re.compile(
-    r"""
-    Project\s*No\s*[:\-]?\s*(JLE\d+)\s+          
-    Item\s*code\s*[:\-]?\s*([A-Z0-9]+)\s+       
-    -\s*(\d+\.?\d*)\s+                           
-    (\w+)\s+                                     
-    (\d+)\s+                                     
-    (\d{2}-\d{2}-\d{4})                          
-    """,
-    flags=re.I | re.VERBOSE
-)
 
-# ---------- Extraction Logic ----------
+# ---------- Extraction Logic for aerospace PDFs ----------
 def extract_indent_data(pdf_path):
     rows = []
     upload_time = datetime.now().strftime("%d-%m-%Y %H:%M:%S")
 
     source_file = os.path.basename(pdf_path)
     file_base = os.path.splitext(source_file)[0]  # filename without .pdf
+
+    last_project_no = None  # To avoid null Project No
 
     with pdfplumber.open(pdf_path) as pdf:
         for page in pdf.pages:
@@ -58,71 +48,55 @@ def extract_indent_data(pdf_path):
                 continue
 
             lines = text.split("\n")
-            project_no = item_code = item_desc = None
+            project_no = item_code = None
             qty = uom = planned_order = planned_start_date = None
 
             for line in lines:
-                upper_line = line.upper()
-                match = row_pattern.search(line)
+                upper = line.upper()
 
-                # -------- Single-line extraction --------
-                if match:
-                    project_no = match.group(1).strip().upper()
-                    item_code = match.group(2).strip().upper()
-                    qty_val = float(match.group(3)) if match.group(3) else None
-                    uom = match.group(4).strip()
-                    planned_order = match.group(5).strip()
-                    planned_start_date = match.group(6).strip()
-
-                    row = {
-                        "ID": str(uuid.uuid4()),
-                        "PROJECT_NO": project_no,
-                        "ITEM_CODE": item_code,
-                        "ITEM_DESCRIPTION": None,
-                        "REQUIRED_QTY": qty_val,
-                        "UOM": uom,
-                        "PLANNED_ORDER": planned_order,
-                        "PLANNED_START_DATE": planned_start_date,
-                        "DATE_OF_UPLOAD": upload_time,
-                        "SOURCE_FILE": source_file,
-                    }
-                    rows.append(row)
-                    continue
-
-                # -------- Multi-line extraction --------
-                if "PROJECT NO" in upper_line:
-                    m = re.search(r"JLE\d+", line)
+                # -------- Project No --------
+                if "PROJECT NO" in upper:
+                    m = re.search(r"J[A-Z]{2}\d{6}", upper)
                     if m:
-                        project_no = m.group().strip().upper()
+                        project_no = m.group().strip()
+                        last_project_no = project_no
 
-                if "ITEM CODE" in upper_line:
-                    m = re.search(r"([A-Z0-9]+)$", line.strip())
+                # Use last detected project number if missing
+                if not project_no and last_project_no:
+                    project_no = last_project_no
+
+                # -------- RM Item Code --------
+                if "RM ITEM CODE" in upper:
+                    m = re.search(r"[A-Z0-9]{5,}", line)
                     if m:
-                        item_code = m.group().strip().upper()
+                        item_code = m.group().strip()
 
-                if "PART DESCRIPTION" in upper_line:
-                    item_desc = re.sub(r".*:\s*", "", line).strip()
+                # -------- Planned Order --------
+                if "PLANNED ORDER" in upper and ":" in line:
+                    planned_order = line.split(":")[1].strip().split()[0]
 
-                if "TOTAL ORDER QUANTITY" in upper_line and ":" in line:
+                # -------- Planned Start Date --------
+                if "PLANNED START DATE" in upper and ":" in line:
+                    planned_start_date = line.split(":")[1].strip()
+
+                # -------- Total Qty + UOM --------
+                if ("TOTAL ORDER QUANTITY" in upper or "TOTAL QUANTITY" in upper) and ":" in line:
                     qty_part = line.split(":", 1)[1].strip().split()
                     qty = qty_part[0]
                     uom = qty_part[1] if len(qty_part) > 1 else None
 
-                if "PLANNED ORDER" in upper_line and ":" in line:
-                    planned_order = line.split(":")[1].strip().split()[0]
-
-                if "PLANNED START DATE" in upper_line:
-                    planned_start_date = line.split(":")[-1].strip()
-
-            # Save multi-line
+            # -------- Save extracted item block --------
             if item_code:
-                qty_val = float(qty) if qty else None
+                try:
+                    qty_val = float(qty) if qty else None
+                except:
+                    qty_val = qty
 
                 row = {
                     "ID": str(uuid.uuid4()),
                     "PROJECT_NO": project_no,
                     "ITEM_CODE": item_code,
-                    "ITEM_DESCRIPTION": item_desc,
+                    "ITEM_DESCRIPTION": None,  # always null as requested
                     "REQUIRED_QTY": qty_val,
                     "UOM": uom,
                     "PLANNED_ORDER": planned_order,
@@ -132,12 +106,13 @@ def extract_indent_data(pdf_path):
                 }
                 rows.append(row)
 
-    # -------- Append UNIQUE_CODE after all rows extracted --------
+    # -------- Add UNIQUE_CODE after completing extraction --------
     for r in rows:
         r["UNIQUE_CODE"] = f"{file_base}{r['PROJECT_NO']}{r['ITEM_CODE']}"
-        indent_collection.document(r["ID"]).set(r)  # store AFTER adding UNIQUE_CODE
+        indent_collection.document(r["ID"]).set(r)
 
     return rows
+
 
 # ---------- API Endpoints ----------
 @app.route("/upload", methods=["POST"])
@@ -182,6 +157,7 @@ def upload_files():
 
     return jsonify(output_data)
 
+
 @app.route("/download", methods=["GET"])
 def download_json():
     if not os.path.exists(OUTPUT_JSON):
@@ -190,6 +166,7 @@ def download_json():
     with open(OUTPUT_JSON, "r", encoding="utf-8") as f:
         data = json.load(f)
     return jsonify(data)
+
 
 # ---------- Run App ----------
 if __name__ == "__main__":
