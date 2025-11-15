@@ -58,7 +58,6 @@ def extract_indent_data(pdf_path):
 
             lines = text.split("\n")
 
-            # Default values for multi-line parsing
             project_no, item_code, item_desc = None, None, None
             qty, uom, planned_order, planned_start_date = None, None, None, None
 
@@ -95,41 +94,40 @@ def extract_indent_data(pdf_path):
                         "UNIQUE_CODE": unique_code,
                     }
 
-
                     rows.append(row)
                     indent_collection.document(row["ID"]).set(row)
                     continue
-                
-            # -------- Case 2: Multi-line key/value --------
-                   if "PROJECT NO" in upper_line and project_no is None:
-                       match = re.search(r"(J[A-Z]{2}\d+)", line)
-                       if match:
-                           project_no = match.group(0).strip().upper()
 
-                
-                if "ITEM CODE" in upper_line:
+                # -------- Case 2: Multi-line key/value --------
+                if "PROJECT NO" in upper_line and project_no is None:
+                    match = re.search(r"(J[A-Z]{2}\d+)", line)
+                    if match:
+                        project_no = match.group(0).strip().upper()
+
+                if "ITEM CODE" in upper_line and item_code is None:
                     parts = line.split(":")
                     if len(parts) > 1:
-                        match = re.search(r"([A-Z0-9]+)$", parts[-1].strip())
+                        match = re.search(r"([A-Z0-9\-]+)$", parts[-1].strip())
                         if match:
                             item_code = match.group(0).strip().upper()
-                
+
                 # -------- Case 3: Plan Item merged row --------
                 if "PLAN ITEM" in upper_line and ":" in line:
                     parts = line.split(":")[-1].strip().split()
                     if len(parts) >= 2:
-                        project_no = parts[0].strip().upper()
-                        item_code = parts[1].strip().upper()
+                        if project_no is None:
+                            project_no = parts[0].strip().upper()
+                        if item_code is None:
+                            item_code = parts[1].strip().upper()
 
                 if "PART DESCRIPTION" in upper_line:
                     item_desc = re.sub(r":?\s*Part\s*Description\s*:\s*", "", line, flags=re.I).strip()
 
                 if "TOTAL ORDER QUANTITY" in upper_line and ":" in line:
-                    qty_part = line.split(":", 1)[1].strip()
-                    parts = qty_part.split()
-                    qty = parts[0]
-                    if len(parts) > 1:
-                        uom = parts[1]
+                    qty_part = line.split(":", 1)[1].strip().split()
+                    qty = qty_part[0]
+                    if len(qty_part) > 1:
+                        uom = qty_part[1]
 
                 if "PLANNED ORDER" in upper_line and ":" in line:
                     planned_order = line.split(":", 1)[1].strip().split()[0]
@@ -138,7 +136,7 @@ def extract_indent_data(pdf_path):
                     planned_start_date = line.split(":")[-1].strip()
 
             # -------- Save multi-line row --------
-            if item_code:  # allow duplicates
+            if item_code:
                 try:
                     qty_val = float(qty) if qty else None
                 except:
@@ -146,7 +144,7 @@ def extract_indent_data(pdf_path):
 
                 file_base = os.path.splitext(os.path.basename(pdf_path))[0]
                 unique_code = f"{file_base}{project_no or ''}{item_code or ''}"
-                
+
                 row = {
                     "ID": str(uuid.uuid4()),
                     "PROJECT_NO": project_no,
@@ -165,6 +163,7 @@ def extract_indent_data(pdf_path):
                 indent_collection.document(row["ID"]).set(row)
 
     return rows
+
 
 # ---------- API Endpoints ----------
 @app.route("/upload", methods=["POST"])
