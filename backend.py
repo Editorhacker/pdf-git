@@ -33,12 +33,12 @@ indent_collection = db.collection("Indent_Quantity")
 # ---------- Regex patterns ----------
 row_pattern = re.compile(
     r"""
-    Project\s*No\s*[:\-]?\s*(JLE\d+)\s+          # Project number
-    Item\s*code\s*[:\-]?\s*([A-Z0-9]+)\s+       # Item code
-    -\s*(\d+\.?\d*)\s+                           # Quantity
-    (\w+)\s+                                     # UOM
-    (\d+)\s+                                     # Planned order
-    (\d{2}-\d{2}-\d{4})                          # Planned start date
+    Project\s*No\s*[:\-]?\s*(JLE\d+)\s+          
+    Item\s*code\s*[:\-]?\s*([A-Z0-9]+)\s+       
+    -\s*(\d+\.?\d*)\s+                           
+    (\w+)\s+                                     
+    (\d+)\s+                                     
+    (\d{2}-\d{2}-\d{4})                          
     """,
     flags=re.I | re.VERBOSE
 )
@@ -49,7 +49,7 @@ def extract_indent_data(pdf_path):
     upload_time = datetime.now().strftime("%d-%m-%Y %H:%M:%S")
 
     source_file = os.path.basename(pdf_path)
-    file_base = os.path.splitext(source_file)[0]  # filename without .pdf
+    file_base = os.path.splitext(source_file)[0]  # 🔥 filename without .pdf
 
     with pdfplumber.open(pdf_path) as pdf:
         for page in pdf.pages:
@@ -58,24 +58,26 @@ def extract_indent_data(pdf_path):
                 continue
 
             lines = text.split("\n")
-
-            project_no = item_code = item_desc = None
-            qty = uom = planned_order = planned_start_date = None
+            project_no, item_code, item_desc = None, None, None
+            qty, uom, planned_order, planned_start_date = None, None, None, None
 
             for line in lines:
                 upper_line = line.upper()
 
-                # -------- Case 1: Full row match --------
+                # -------- Case 1: Full row --------
                 match = row_pattern.search(line)
                 if match:
                     project_no = match.group(1).strip().upper()
                     item_code = match.group(2).strip().upper()
-                    qty_val = float(match.group(3)) if match.group(3) else None
+                    try:
+                        qty_val = float(match.group(3))
+                    except:
+                        qty_val = match.group(3)
                     uom = match.group(4).strip()
                     planned_order = match.group(5).strip()
                     planned_start_date = match.group(6).strip()
 
-                    unique_code = f"{file_base}{project_no}{item_code}"
+                    unique_code = f"{file_base}{project_no}{item_code}"  # 🔥 UNIQUE CODE
 
                     row = {
                         "ID": str(uuid.uuid4()),
@@ -88,13 +90,13 @@ def extract_indent_data(pdf_path):
                         "PLANNED_START_DATE": planned_start_date,
                         "DATE_OF_UPLOAD": upload_time,
                         "SOURCE_FILE": source_file,
-                        "UNIQUE_CODE": unique_code
+                        "UNIQUE_CODE": unique_code,  # 🔥 STORE UNIQUE CODE
                     }
                     rows.append(row)
                     indent_collection.document(row["ID"]).set(row)
                     continue
 
-                # -------- Case 2: Multi-line parsing --------
+                # -------- Case 2: Multi-line --------
                 if "PROJECT NO" in upper_line:
                     match = re.search(r"JLE\d+", line)
                     if match:
@@ -118,10 +120,10 @@ def extract_indent_data(pdf_path):
 
                 if "TOTAL ORDER QUANTITY" in upper_line and ":" in line:
                     qty_part = line.split(":", 1)[1].strip()
-                    qty_split = qty_part.split()
-                    qty = qty_split[0]
-                    if len(qty_split) > 1:
-                        uom = qty_split[1]
+                    parts = qty_part.split()
+                    qty = parts[0]
+                    if len(parts) > 1:
+                        uom = parts[1]
 
                 if "PLANNED ORDER" in upper_line and ":" in line:
                     planned_order = line.split(":", 1)[1].strip().split()[0]
@@ -129,14 +131,14 @@ def extract_indent_data(pdf_path):
                 if "PLANNED START DATE" in upper_line:
                     planned_start_date = line.split(":")[-1].strip()
 
-            # -------- Save multi-line row --------
+            # -------- Final Save for multi-line --------
             if item_code:
                 try:
                     qty_val = float(qty) if qty else None
                 except:
                     qty_val = qty
 
-                unique_code = f"{file_base}{project_no}{item_code}"
+                unique_code = f"{file_base}{project_no}{item_code}"  # 🔥 UNIQUE CODE
 
                 row = {
                     "ID": str(uuid.uuid4()),
@@ -149,7 +151,7 @@ def extract_indent_data(pdf_path):
                     "PLANNED_START_DATE": planned_start_date,
                     "DATE_OF_UPLOAD": upload_time,
                     "SOURCE_FILE": source_file,
-                    "UNIQUE_CODE": unique_code
+                    "UNIQUE_CODE": unique_code,  # 🔥 STORE UNIQUE CODE
                 }
                 rows.append(row)
                 indent_collection.document(row["ID"]).set(row)
@@ -174,9 +176,16 @@ def upload_files():
         try:
             indent_data = extract_indent_data(save_path)
             all_indent_data.extend(indent_data)
-            file_summary[safe_filename] = {"items_extracted": len(indent_data), "status": "Success"}
+
+            file_summary[safe_filename] = {
+                "items_extracted": len(indent_data),
+                "status": "Success"
+            }
         except Exception as e:
-            file_summary[safe_filename] = {"items_extracted": 0, "status": f"Error: {str(e)}"}
+            file_summary[safe_filename] = {
+                "items_extracted": 0,
+                "status": f"Error: {str(e)}"
+            }
 
     output_data = {
         "indent_data": all_indent_data,
