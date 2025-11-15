@@ -99,12 +99,12 @@ def extract_indent_data(pdf_path):
                     rows.append(row)
                     indent_collection.document(row["ID"]).set(row)
                     continue
-
-                # -------- Case 2: Multi-line key/value --------
-               if "PROJECT NO" in upper_line and project_no is None:
-                   match = re.search(r"(J[A-Z]{2}\d+)", line)
-                   if match:
-                       project_no = match.group(0).strip().upper()
+                
+            # -------- Case 2: Multi-line key/value --------
+                   if "PROJECT NO" in upper_line and project_no is None:
+                       match = re.search(r"(J[A-Z]{2}\d+)", line)
+                       if match:
+                           project_no = match.group(0).strip().upper()
 
                 
                 if "ITEM CODE" in upper_line:
