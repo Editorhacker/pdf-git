@@ -77,13 +77,18 @@ def extract_indent_data(pdf_path):
 
                 # -------- Planned Start Date --------
                 if "PLANNED START DATE" in upper and ":" in line:
-                    planned_start_date = line.split(":")[1].strip()
+                    # extract only DD-MM-YYYY
+                    m = re.search(r"\d{2}-\d{2}-\d{4}", line)
+                    if m:
+                        planned_start_date = m.group()
 
                 # -------- Total Qty + UOM --------
                 if ("TOTAL ORDER QUANTITY" in upper or "TOTAL QUANTITY" in upper) and ":" in line:
-                    qty_part = line.split(":", 1)[1].strip().split()
-                    qty = qty_part[0]
-                    uom = qty_part[1] if len(qty_part) > 1 else None
+                    m = re.search(r"(\d+(\.\d+)?)(\s*[A-Za-z]+)", line)
+                    if m:
+                        qty = m.group(1)         # numeric value
+                        uom = m.group(3).strip() # unit
+
 
             # -------- Save extracted item block --------
             if item_code:
