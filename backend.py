@@ -78,22 +78,23 @@ def extract_indent_data(pdf_path):
                     planned_order = match.group(5).strip()
                     planned_start_date = match.group(6).strip()
 
-file_base = os.path.splitext(os.path.basename(pdf_path))[0]
-unique_code = f"{file_base}{project_no or ''}{item_code or ''}"
+                    file_base = os.path.splitext(os.path.basename(pdf_path))[0]
+                    unique_code = f"{file_base}{project_no or ''}{item_code or ''}"
 
-row = {
-    "ID": str(uuid.uuid4()),
-    "PROJECT_NO": project_no,
-    "ITEM_CODE": item_code,
-    "ITEM_DESCRIPTION": None,
-    "REQUIRED_QTY": qty_val,
-    "UOM": uom,
-    "PLANNED_ORDER": planned_order,
-    "PLANNED_START_DATE": planned_start_date,
-    "DATE_OF_UPLOAD": upload_time,
-    "SOURCE_FILE": os.path.basename(pdf_path),
-    "UNIQUE_CODE": unique_code,
-}
+                    row = {
+                        "ID": str(uuid.uuid4()),
+                        "PROJECT_NO": project_no,
+                        "ITEM_CODE": item_code,
+                        "ITEM_DESCRIPTION": None,
+                        "REQUIRED_QTY": qty_val,
+                        "UOM": uom,
+                        "PLANNED_ORDER": planned_order,
+                        "PLANNED_START_DATE": planned_start_date,
+                        "DATE_OF_UPLOAD": upload_time,
+                        "SOURCE_FILE": os.path.basename(pdf_path),
+                        "UNIQUE_CODE": unique_code,
+                    }
+
 
                     rows.append(row)
                     indent_collection.document(row["ID"]).set(row)
@@ -143,21 +144,21 @@ row = {
                     qty_val = qty
 
                 file_base = os.path.splitext(os.path.basename(pdf_path))[0]
-unique_code = f"{file_base}{project_no or ''}{item_code or ''}"
-
-row = {
-    "ID": str(uuid.uuid4()),
-    "PROJECT_NO": project_no,
-    "ITEM_CODE": item_code,
-    "ITEM_DESCRIPTION": item_desc,
-    "REQUIRED_QTY": qty_val,
-    "UOM": uom,
-    "PLANNED_ORDER": planned_order,
-    "PLANNED_START_DATE": planned_start_date,
-    "DATE_OF_UPLOAD": upload_time,
-    "SOURCE_FILE": os.path.basename(pdf_path),
-    "UNIQUE_CODE": unique_code,
-}
+                unique_code = f"{file_base}{project_no or ''}{item_code or ''}"
+                
+                row = {
+                    "ID": str(uuid.uuid4()),
+                    "PROJECT_NO": project_no,
+                    "ITEM_CODE": item_code,
+                    "ITEM_DESCRIPTION": item_desc,
+                    "REQUIRED_QTY": qty_val,
+                    "UOM": uom,
+                    "PLANNED_ORDER": planned_order,
+                    "PLANNED_START_DATE": planned_start_date,
+                    "DATE_OF_UPLOAD": upload_time,
+                    "SOURCE_FILE": os.path.basename(pdf_path),
+                    "UNIQUE_CODE": unique_code,
+                }
 
                 rows.append(row)
                 indent_collection.document(row["ID"]).set(row)
