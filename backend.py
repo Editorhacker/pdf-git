@@ -72,8 +72,10 @@ def extract_indent_data(pdf_path):
                         item_code = m.group().strip()
 
                 # -------- PLANNED ORDER detection --------
-                if "PLANNED ORDER" in upper and ":" in line:
-                    planned_order = line.split(":", 1)[1].strip()
+                if "PLANNED ORDER" in upper:
+                    m = re.search(r"(\d+)", line)
+                    if m:
+                        planned_order = m.group(1)
 
                 # -------- PLANNED START DATE --------
                 if "PLANNED START DATE" in upper:
