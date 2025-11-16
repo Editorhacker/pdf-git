@@ -37,9 +37,10 @@ def extract_indent_data(pdf_path):
     upload_time = datetime.now().strftime("%d-%m-%Y %H:%M:%S")
 
     source_file = os.path.basename(pdf_path)
-    file_base = os.path.splitext(source_file)[0]  # filename without .pdf
+    file_base = os.path.splitext(source_file)[0]
 
-    last_project_no = None  # To avoid null Project No
+    last_project_no = None
+    batch = db.batch()
 
     with pdfplumber.open(pdf_path) as pdf:
         for page in pdf.pages:
@@ -54,54 +55,52 @@ def extract_indent_data(pdf_path):
             for line in lines:
                 upper = line.upper()
 
-                # -------- Project No --------
-                if "PROJECT NO" in upper:
+                # -------- PROJECT NO (any format) --------
+                if "PROJECT" in upper and "NO" in upper:
                     m = re.search(r"J[A-Z]{2}\d{6}", upper)
                     if m:
                         project_no = m.group().strip()
                         last_project_no = project_no
 
-                # Use last detected project number if missing
                 if not project_no and last_project_no:
                     project_no = last_project_no
 
-                # -------- RM Item Code --------
-                if "RM ITEM CODE" in upper:
+                # -------- ITEM CODE detection (RM / BOI / Fixture / generic) --------
+                if "ITEM CODE" in upper:
                     m = re.search(r"[A-Z0-9]{5,}", line)
                     if m:
                         item_code = m.group().strip()
 
-                # -------- Planned Order --------
+                # -------- PLANNED ORDER detection --------
                 if "PLANNED ORDER" in upper and ":" in line:
-                    planned_order = line.split(":")[1].strip().split()[0]
+                    planned_order = line.split(":", 1)[1].strip()
 
-                # -------- Planned Start Date --------
-                if "PLANNED START DATE" in upper and ":" in line:
-                    # extract only DD-MM-YYYY
+                # -------- PLANNED START DATE --------
+                if "PLANNED START DATE" in upper:
                     m = re.search(r"\d{2}-\d{2}-\d{4}", line)
                     if m:
                         planned_start_date = m.group()
 
-                # -------- Total Qty + UOM --------
-                if ("TOTAL ORDER QUANTITY" in upper or "TOTAL QUANTITY" in upper) and ":" in line:
-                    m = re.search(r"(\d+(\.\d+)?)(\s*[A-Za-z]+)", line)
+                # -------- QUANTITY detection (supports weight/ech/nos etc) --------
+                if "TOTAL" in upper and ("QUANTITY" in upper or "WEIGHT" in upper or "ORDER" in upper):
+                    m = re.search(r"([\d,]+(\.\d+)?)[\s]*([A-Za-z%/]+)", line)
                     if m:
-                        qty = m.group(1)         # numeric value
-                        uom = m.group(3).strip() # unit
+                        qty = m.group(1).replace(",", "")
+                        uom = m.group(3).strip()
 
-
-            # -------- Save extracted item block --------
+            # -------- If item row completed → push to firestore --------
             if item_code:
                 try:
                     qty_val = float(qty) if qty else None
                 except:
                     qty_val = qty
 
+                row_id = str(uuid.uuid4())
                 row = {
-                    "ID": str(uuid.uuid4()),
+                    "ID": row_id,
                     "PROJECT_NO": project_no,
                     "ITEM_CODE": item_code,
-                    "ITEM_DESCRIPTION": None,  # always null as requested
+                    "ITEM_DESCRIPTION": None,  # placeholder
                     "REQUIRED_QTY": qty_val,
                     "UOM": uom,
                     "PLANNED_ORDER": planned_order,
@@ -109,12 +108,16 @@ def extract_indent_data(pdf_path):
                     "DATE_OF_UPLOAD": upload_time,
                     "SOURCE_FILE": source_file,
                 }
+
+                row["UNIQUE_CODE"] = f"{file_base}_{project_no}_{item_code}"
                 rows.append(row)
 
-    # -------- Add UNIQUE_CODE after completing extraction --------
-    for r in rows:
-        r["UNIQUE_CODE"] = f"{file_base}{r['PROJECT_NO']}{r['ITEM_CODE']}"
-        indent_collection.document(r["ID"]).set(r)
+                doc_ref = indent_collection.document(row_id)
+                batch.set(doc_ref, row)
+
+    # -------- Commit batch write to Firestore --------
+    if rows:
+        batch.commit()
 
     return rows
 
