@@ -111,7 +111,7 @@ def extract_indent_data(pdf_path):
                     "SOURCE_FILE": source_file,
                 }
 
-                row["UNIQUE_CODE"] = f"{file_base}_{project_no}_{item_code}"
+                row["UNIQUE_CODE"] = f"{file_base}{project_no}{item_code}"
                 rows.append(row)
 
                 doc_ref = indent_collection.document(row_id)
