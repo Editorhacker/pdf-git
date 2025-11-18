@@ -109,6 +109,7 @@ def extract_indent_data(pdf_path):
                     "PLANNED_START_DATE": planned_start_date,
                     "DATE_OF_UPLOAD": upload_time,
                     "SOURCE_FILE": source_file,
+                    "ReferenceB": file_base,
                 }
 
                 row["UNIQUE_CODE"] = f"{file_base}{project_no}{item_code}"
