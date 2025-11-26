@@ -7,7 +7,7 @@ from flask_cors import CORS
 import os
 import uuid
 import firebase_admin
-from firebase_admin import credentials, firestore
+from firebase_admin import credentials, db
 from werkzeug.utils import secure_filename
 
 # ---------- Flask App ----------
@@ -18,7 +18,7 @@ OUTPUT_JSON = "indent_data.json"
 UPLOAD_FOLDER = "uploads"
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
-# ---------- Firestore Setup ----------
+# ---------- Realtime Database Setup ----------
 firebase_json = os.getenv("FIREBASE_CREDENTIALS")
 if not firebase_json:
     raise Exception("FIREBASE_CREDENTIALS env var not set")
@@ -26,9 +26,11 @@ if not firebase_json:
 cred_dict = json.loads(firebase_json)
 cred = credentials.Certificate(cred_dict)
 
-firebase_admin.initialize_app(cred)
-db = firestore.client()
-indent_collection = db.collection("Indent_Quantity")
+firebase_admin.initialize_app(cred, {
+    "databaseURL": os.getenv("DATABASE_URL")  # MUST be in .env or hosting config
+})
+
+indent_ref = db.reference("Indent_Quantity")
 
 
 # ---------- Extraction Logic for aerospace PDFs ----------
@@ -40,7 +42,7 @@ def extract_indent_data(pdf_path):
     file_base = os.path.splitext(source_file)[0]
 
     last_project_no = None
-    batch = db.batch()
+    updates = {}  # multi-path update payload
 
     with pdfplumber.open(pdf_path) as pdf:
         for page in pdf.pages:
@@ -55,7 +57,6 @@ def extract_indent_data(pdf_path):
             for line in lines:
                 upper = line.upper()
 
-                # -------- PROJECT NO (any format) --------
                 if "PROJECT" in upper and "NO" in upper:
                     m = re.search(r"J[A-Z]{2}\d{6}", upper)
                     if m:
@@ -65,32 +66,27 @@ def extract_indent_data(pdf_path):
                 if not project_no and last_project_no:
                     project_no = last_project_no
 
-                # -------- ITEM CODE detection (RM / BOI / Fixture / generic) --------
                 if "ITEM CODE" in upper:
                     m = re.search(r"[A-Z0-9]{5,}", line)
                     if m:
                         item_code = m.group().strip()
 
-                # -------- PLANNED ORDER detection --------
                 if "PLANNED ORDER" in upper:
                     m = re.search(r"(\d+)", line)
                     if m:
                         planned_order = m.group(1)
 
-                # -------- PLANNED START DATE --------
                 if "PLANNED START DATE" in upper:
                     m = re.search(r"\d{2}-\d{2}-\d{4}", line)
                     if m:
                         planned_start_date = m.group()
 
-                # -------- QUANTITY detection (supports weight/ech/nos etc) --------
                 if "TOTAL" in upper and ("QUANTITY" in upper or "WEIGHT" in upper or "ORDER" in upper):
                     m = re.search(r"([\d,]+(\.\d+)?)[\s]*([A-Za-z%/]+)", line)
                     if m:
                         qty = m.group(1).replace(",", "")
                         uom = m.group(3).strip()
 
-            # -------- If item row completed → push to firestore --------
             if item_code:
                 try:
                     qty_val = float(qty) if qty else None
@@ -102,7 +98,7 @@ def extract_indent_data(pdf_path):
                     "ID": row_id,
                     "PROJECT_NO": project_no,
                     "ITEM_CODE": item_code,
-                    "ITEM_DESCRIPTION": None,  # placeholder
+                    "ITEM_DESCRIPTION": None,
                     "REQUIRED_QTY": qty_val,
                     "UOM": uom,
                     "PLANNED_ORDER": planned_order,
@@ -115,12 +111,11 @@ def extract_indent_data(pdf_path):
                 row["UNIQUE_CODE"] = f"{file_base}{project_no}{item_code}"
                 rows.append(row)
 
-                doc_ref = indent_collection.document(row_id)
-                batch.set(doc_ref, row)
+                updates[f"{row_id}"] = row
 
-    # -------- Commit batch write to Firestore --------
+    # -------- Commit to Realtime Database --------
     if rows:
-        batch.commit()
+        indent_ref.update(updates)
 
     return rows
 
