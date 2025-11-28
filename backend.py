@@ -109,6 +109,7 @@ def extract_indent_data(pdf_path):
                     "PROJECT_NO": project_no,
                     "ITEM_CODE": item_code,
                     "ITEM_DESCRIPTION": None,  # placeholder
+                    "CATEGORY": category,         # 🔥 newly added
                     "REQUIRED_QTY": qty_val,
                     "UOM": uom,
                     "PLANNED_ORDER": planned_order,
