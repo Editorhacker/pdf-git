@@ -52,6 +52,12 @@ def extract_indent_data(pdf_path):
             project_no = item_code = None
             qty = uom = planned_order = planned_start_date = None
 
+            category = None
+            if "BOI Item code" in text or "BOI for" in text:
+                category = "BOI"
+            elif "RM Item code" in text or "RM for" in text:
+                category = "RM"
+
             for line in lines:
                 upper = line.upper()
 
