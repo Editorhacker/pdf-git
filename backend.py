@@ -31,7 +31,7 @@ db = firestore.client()
 indent_collection = db.collection("Indent_Quantity")
 
 
-# ---------- Extraction Logic for aerospace PDFs ----------
+# ---------- Extraction Logic ----------
 def extract_indent_data(pdf_path):
 
     rows = []
@@ -52,7 +52,7 @@ def extract_indent_data(pdf_path):
 
             lines = text.split("\n")
 
-            # PAGE-LEVEL VARIABLES
+            # PAGE VARIABLES
             project_no = None
             item_code = None
             qty = None
@@ -67,24 +67,39 @@ def extract_indent_data(pdf_path):
             elif "RM Item code" in text or "RM for" in text:
                 category = "RM"
 
-            # ---------- Extract Description Fields ----------
+            # ---------- Extract Description ----------
             material_spec = None
             material_size = None
 
-            # Material Spec
             spec_match = re.search(r"Material Spec/ Std\s*-\s*(.*)", text)
             if spec_match:
                 material_spec = spec_match.group(1).strip()
 
-            # Material Size
             size_match = re.search(r"Material Size and Qty\s*-\s*(.*)", text)
             if size_match:
                 material_size = size_match.group(1).strip()
 
-            # Final Description
-            item_description = None
-            if material_spec and material_size:
-                item_description = f"{material_spec} {material_size}"
+            item_description = (
+                f"{material_spec} {material_size}"
+                if material_spec and material_size
+                else None
+            )
+
+            # ---------- Extract Material Type + RM Form ----------
+            material_type = None
+            rm_form = None
+
+            type_match = re.search(r"Material Type\s*-\s*(.*)", text)
+            if type_match:
+                material_type = type_match.group(1).strip()
+
+            form_match = re.search(r"RM Form\s*-\s*(.*)", text)
+            if form_match:
+                rm_form = form_match.group(1).strip()
+
+            final_type = None
+            if material_type and rm_form:
+                final_type = f"{rm_form}{material_type}".replace(" ", "")
 
             # ---------- Line-by-Line Extraction ----------
             for line in lines:
@@ -118,7 +133,7 @@ def extract_indent_data(pdf_path):
                     if m:
                         planned_start_date = m.group()
 
-                # ---- QUANTITY / WEIGHT ----
+                # ---- QTY / WEIGHT ----
                 if "TOTAL" in upper and ("QUANTITY" in upper or "WEIGHT" in upper or "ORDER" in upper):
                     m = re.search(r"([\d,]+(\.\d+)?)[\s]*([A-Za-z%/]+)", line)
                     if m:
@@ -138,8 +153,9 @@ def extract_indent_data(pdf_path):
                     "ID": row_id,
                     "PROJECT_NO": project_no,
                     "ITEM_CODE": item_code,
-                    "ITEM_DESCRIPTION": item_description,  # 🌟 ADDED
+                    "ITEM_DESCRIPTION": item_description,
                     "CATEGORY": category,
+                    "TYPE": final_type,        # ⭐ NEW FIELD
                     "REQUIRED_QTY": qty_val,
                     "UOM": uom,
                     "PLANNED_ORDER": planned_order,
@@ -153,7 +169,6 @@ def extract_indent_data(pdf_path):
 
                 rows.append(row)
 
-                # Push to Firestore batch
                 doc_ref = indent_collection.document(row_id)
                 batch.set(doc_ref, row)
 
@@ -200,7 +215,7 @@ def upload_files():
         "total_items": len(all_indent_data),
         "total_files_processed": len(file_summary),
         "file_summary": file_summary,
-        "unique_item_codes": len(set(i["ITEM_CODE"] for i in all_indent_data if "ITEM_CODE" in i))
+        "unique_item_codes": len(set(i["ITEM_CODE"] for i in all_indent_data))
     }
 
     with open(OUTPUT_JSON, "w", encoding="utf-8") as f:
