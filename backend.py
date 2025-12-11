@@ -33,6 +33,7 @@ indent_collection = db.collection("Indent_Quantity")
 
 # ---------- Extraction Logic for aerospace PDFs ----------
 def extract_indent_data(pdf_path):
+
     rows = []
     upload_time = datetime.now().strftime("%d-%m-%Y %H:%M:%S")
 
@@ -43,25 +44,53 @@ def extract_indent_data(pdf_path):
     batch = db.batch()
 
     with pdfplumber.open(pdf_path) as pdf:
+
         for page in pdf.pages:
             text = page.extract_text()
             if not text:
                 continue
 
             lines = text.split("\n")
-            project_no = item_code = None
-            qty = uom = planned_order = planned_start_date = None
 
+            # PAGE-LEVEL VARIABLES
+            project_no = None
+            item_code = None
+            qty = None
+            uom = None
+            planned_order = None
+            planned_start_date = None
+
+            # ---------- Detect Category ----------
             category = None
             if "BOI Item code" in text or "BOI for" in text:
                 category = "BOI"
             elif "RM Item code" in text or "RM for" in text:
                 category = "RM"
 
+            # ---------- Extract Description Fields ----------
+            material_spec = None
+            material_size = None
+
+            # Material Spec
+            spec_match = re.search(r"Material Spec/ Std\s*-\s*(.*)", text)
+            if spec_match:
+                material_spec = spec_match.group(1).strip()
+
+            # Material Size
+            size_match = re.search(r"Material Size and Qty\s*-\s*(.*)", text)
+            if size_match:
+                material_size = size_match.group(1).strip()
+
+            # Final Description
+            item_description = None
+            if material_spec and material_size:
+                item_description = f"{material_spec} {material_size}"
+
+            # ---------- Line-by-Line Extraction ----------
             for line in lines:
                 upper = line.upper()
 
-                # -------- PROJECT NO (any format) --------
+                # ---- PROJECT NO ----
                 if "PROJECT" in upper and "NO" in upper:
                     m = re.search(r"J[A-Z]{2}\d{6}", upper)
                     if m:
@@ -71,32 +100,32 @@ def extract_indent_data(pdf_path):
                 if not project_no and last_project_no:
                     project_no = last_project_no
 
-                # -------- ITEM CODE detection (RM / BOI / Fixture / generic) --------
+                # ---- ITEM CODE ----
                 if "ITEM CODE" in upper:
                     m = re.search(r"[A-Z0-9]{5,}", line)
                     if m:
                         item_code = m.group().strip()
 
-                # -------- PLANNED ORDER detection --------
+                # ---- PLANNED ORDER ----
                 if "PLANNED ORDER" in upper:
                     m = re.search(r"(\d+)", line)
                     if m:
                         planned_order = m.group(1)
 
-                # -------- PLANNED START DATE --------
+                # ---- PLANNED START DATE ----
                 if "PLANNED START DATE" in upper:
                     m = re.search(r"\d{2}-\d{2}-\d{4}", line)
                     if m:
                         planned_start_date = m.group()
 
-                # -------- QUANTITY detection (supports weight/ech/nos etc) --------
+                # ---- QUANTITY / WEIGHT ----
                 if "TOTAL" in upper and ("QUANTITY" in upper or "WEIGHT" in upper or "ORDER" in upper):
                     m = re.search(r"([\d,]+(\.\d+)?)[\s]*([A-Za-z%/]+)", line)
                     if m:
                         qty = m.group(1).replace(",", "")
                         uom = m.group(3).strip()
 
-            # -------- If item row completed → push to firestore --------
+            # ---------- Build Final Row ----------
             if item_code:
                 try:
                     qty_val = float(qty) if qty else None
@@ -104,12 +133,13 @@ def extract_indent_data(pdf_path):
                     qty_val = qty
 
                 row_id = str(uuid.uuid4())
+
                 row = {
                     "ID": row_id,
                     "PROJECT_NO": project_no,
                     "ITEM_CODE": item_code,
-                    "ITEM_DESCRIPTION": None,  # placeholder
-                    "CATEGORY": category,         # 🔥 newly added
+                    "ITEM_DESCRIPTION": item_description,  # 🌟 ADDED
+                    "CATEGORY": category,
                     "REQUIRED_QTY": qty_val,
                     "UOM": uom,
                     "PLANNED_ORDER": planned_order,
@@ -120,12 +150,14 @@ def extract_indent_data(pdf_path):
                 }
 
                 row["UNIQUE_CODE"] = f"{file_base}{project_no}{item_code}"
+
                 rows.append(row)
 
+                # Push to Firestore batch
                 doc_ref = indent_collection.document(row_id)
                 batch.set(doc_ref, row)
 
-    # -------- Commit batch write to Firestore --------
+    # Commit batch write
     if rows:
         batch.commit()
 
@@ -148,13 +180,14 @@ def upload_files():
         f.save(save_path)
 
         try:
-            indent_data = extract_indent_data(save_path)
-            all_indent_data.extend(indent_data)
+            data = extract_indent_data(save_path)
+            all_indent_data.extend(data)
 
             file_summary[safe_filename] = {
-                "items_extracted": len(indent_data),
+                "items_extracted": len(data),
                 "status": "Success"
             }
+
         except Exception as e:
             file_summary[safe_filename] = {
                 "items_extracted": 0,
@@ -167,7 +200,7 @@ def upload_files():
         "total_items": len(all_indent_data),
         "total_files_processed": len(file_summary),
         "file_summary": file_summary,
-        "unique_item_codes": len(set(item["ITEM_CODE"] for item in all_indent_data if "ITEM_CODE" in item))
+        "unique_item_codes": len(set(i["ITEM_CODE"] for i in all_indent_data if "ITEM_CODE" in i))
     }
 
     with open(OUTPUT_JSON, "w", encoding="utf-8") as f:
@@ -183,6 +216,7 @@ def download_json():
 
     with open(OUTPUT_JSON, "r", encoding="utf-8") as f:
         data = json.load(f)
+
     return jsonify(data)
 
 
