@@ -67,23 +67,23 @@ def extract_indent_data(pdf_path):
             elif "RM Item code" in text or "RM for" in text:
                 category = "RM"
 
-            # ---------- Extract Material Description ----------
-            material_spec = None
-            material_size = None
+            # # ---------- Extract Material Description ----------
+            # material_spec = None
+            # material_size = None
 
-            spec_match = re.search(r"Material Spec/ Std\s*-\s*(.*)", text)
-            if spec_match:
-                material_spec = spec_match.group(1).strip()
+            # spec_match = re.search(r"Material Spec/ Std\s*-\s*(.*)", text)
+            # if spec_match:
+            #     material_spec = spec_match.group(1).strip()
 
-            size_match = re.search(r"Material Size and Qty\s*-\s*(.*)", text)
-            if size_match:
-                material_size = size_match.group(1).strip()
+            # size_match = re.search(r"Material Size and Qty\s*-\s*(.*)", text)
+            # if size_match:
+            #     material_size = size_match.group(1).strip()
 
-            item_description = (
-                f"{material_spec} {material_size}"
-                if material_spec and material_size
-                else None
-            )
+            # item_description = (
+            #     f"{material_spec} {material_size}"
+            #     if material_spec and material_size
+            #     else None
+            # )
 
             # ---------- Extract Material Type + RM Form ----------
             material_type = None
@@ -102,22 +102,22 @@ def extract_indent_data(pdf_path):
                 final_type = f"{rm_form}{material_type}".replace(" ", "")
 
             # ---------- Extract Fixture Code (ERxxxx_xxxxxx) ----------
-            fixture_code = None
+            # fixture_code = None
 
-            plan_fixture_match = re.search(
-                r"Plan Item\s*:\s*[A-Z0-9]+\s+(ER[0-9]+_[A-Z0-9]+)", text
-            )
-            if plan_fixture_match:
-                fixture_code = plan_fixture_match.group(1).strip()
+            # plan_fixture_match = re.search(
+            #     r"Plan Item\s*:\s*[A-Z0-9]+\s+(ER[0-9]+_[A-Z0-9]+)", text
+            # )
+            # if plan_fixture_match:
+            #     fixture_code = plan_fixture_match.group(1).strip()
 
             # ---------- Extract Plan Item Description ----------
-            plan_item_description = None
+            item_description = None
 
             plan_desc_match = re.search(
                 r"Plan Item\s*:\s*[A-Z0-9]+\s+(.*)", text
             )
             if plan_desc_match:
-                plan_item_description = plan_desc_match.group(1).strip()
+                item_description = plan_desc_match.group(1).strip()
 
             # ---------- Line-by-Line Extraction ----------
             for line in lines:
@@ -174,8 +174,8 @@ def extract_indent_data(pdf_path):
 
                     "ITEM_DESCRIPTION": item_description,
                     "TYPE": final_type,
-                    "FIXTURE_CODE": fixture_code,
-                    "PLAN_ITEM_DESCRIPTION": plan_item_description,
+                    # "FIXTURE_CODE": fixture_code,
+                    # "PLAN_ITEM_DESCRIPTION": plan_item_description,
 
                     "CATEGORY": category,
                     "REQUIRED_QTY": qty_val,
