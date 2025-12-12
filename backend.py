@@ -60,14 +60,14 @@ def extract_indent_data(pdf_path):
             planned_order = None
             planned_start_date = None
 
-            # ---------- Detect Category ----------
+            # ---------- Detect RM / BOI Category ----------
             category = None
             if "BOI Item code" in text or "BOI for" in text:
                 category = "BOI"
             elif "RM Item code" in text or "RM for" in text:
                 category = "RM"
 
-            # ---------- Extract Description ----------
+            # ---------- Extract Material Description ----------
             material_spec = None
             material_size = None
 
@@ -101,6 +101,24 @@ def extract_indent_data(pdf_path):
             if material_type and rm_form:
                 final_type = f"{rm_form}{material_type}".replace(" ", "")
 
+            # ---------- Extract Fixture Code (ERxxxx_xxxxxx) ----------
+            fixture_code = None
+
+            plan_fixture_match = re.search(
+                r"Plan Item\s*:\s*[A-Z0-9]+\s+(ER[0-9]+_[A-Z0-9]+)", text
+            )
+            if plan_fixture_match:
+                fixture_code = plan_fixture_match.group(1).strip()
+
+            # ---------- Extract Plan Item Description ----------
+            plan_item_description = None
+
+            plan_desc_match = re.search(
+                r"Plan Item\s*:\s*[A-Z0-9]+\s+(.*)", text
+            )
+            if plan_desc_match:
+                plan_item_description = plan_desc_match.group(1).strip()
+
             # ---------- Line-by-Line Extraction ----------
             for line in lines:
                 upper = line.upper()
@@ -133,7 +151,7 @@ def extract_indent_data(pdf_path):
                     if m:
                         planned_start_date = m.group()
 
-                # ---- QTY / WEIGHT ----
+                # ---- QUANTITY / WEIGHT ----
                 if "TOTAL" in upper and ("QUANTITY" in upper or "WEIGHT" in upper or "ORDER" in upper):
                     m = re.search(r"([\d,]+(\.\d+)?)[\s]*([A-Za-z%/]+)", line)
                     if m:
@@ -153,9 +171,13 @@ def extract_indent_data(pdf_path):
                     "ID": row_id,
                     "PROJECT_NO": project_no,
                     "ITEM_CODE": item_code,
+
                     "ITEM_DESCRIPTION": item_description,
+                    "TYPE": final_type,
+                    "FIXTURE_CODE": fixture_code,
+                    "PLAN_ITEM_DESCRIPTION": plan_item_description,
+
                     "CATEGORY": category,
-                    "TYPE": final_type,        # ⭐ NEW FIELD
                     "REQUIRED_QTY": qty_val,
                     "UOM": uom,
                     "PLANNED_ORDER": planned_order,
@@ -172,7 +194,6 @@ def extract_indent_data(pdf_path):
                 doc_ref = indent_collection.document(row_id)
                 batch.set(doc_ref, row)
 
-    # Commit batch write
     if rows:
         batch.commit()
 
